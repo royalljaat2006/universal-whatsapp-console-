@@ -40,6 +40,7 @@ PERMISSIONS: Final[dict[str, str]] = {
     "audit.view": "View audit logs",
     "webhooks.view": "View raw webhook events",
     "webhooks.replay": "Replay webhook events",
+    "api_keys.manage": "Create and revoke API keys",
 }
 
 _VIEW_ONLY = {code for code in PERMISSIONS if code.endswith(".view")} - {

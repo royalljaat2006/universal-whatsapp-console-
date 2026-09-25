@@ -46,6 +46,7 @@ LOCAL_APPS = [
     "core",
     "apps.identity",
     "apps.organizations",
+    "apps.apikeys",
     "apps.businesses",
     "apps.teams",
     "apps.audit",
@@ -62,6 +63,7 @@ LOCAL_APPS = [
     "apps.notifications",
     "apps.webhooks",
     "apps.realtime",
+    "apps.platform",
 ]
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
 
@@ -177,6 +179,7 @@ FILE_UPLOAD_MAX_MEMORY_SIZE = 5 * 1024 * 1024
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": [
         "rest_framework.authentication.SessionAuthentication",
+        "apps.apikeys.authentication.ApiKeyAuthentication",
     ],
     "DEFAULT_PERMISSION_CLASSES": ["rest_framework.permissions.IsAuthenticated"],
     "DEFAULT_PAGINATION_CLASS": "core.api.pagination.StandardCursorPagination",

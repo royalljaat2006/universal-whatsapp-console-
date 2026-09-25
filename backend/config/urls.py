@@ -16,6 +16,7 @@ from apps.businesses.access_api import BusinessAccessRevokeView, BusinessAccessV
 from apps.contacts import api as contacts_api
 from apps.conversations import api as conversations_api
 from apps.messaging.api import MessageStatusHistoryView
+from apps.organizations.api import invitations as invitations_api
 from apps.teams import api as teams_api
 from apps.templates import api as templates_api
 from apps.webhooks.views import meta_whatsapp_webhook
@@ -23,6 +24,8 @@ from apps.webhooks.views import meta_whatsapp_webhook
 api_v1: list[URLPattern | URLResolver] = [
     path("auth/", include("apps.identity.urls")),
     path("organizations/", include("apps.organizations.urls")),
+    path("api-keys/", include("apps.apikeys.urls")),
+    path("platform/", include("apps.platform.urls")),
     path("businesses/", include("apps.businesses.urls")),
     path("whatsapp/", include("apps.whatsapp.urls")),
     path("businesses/<uuid:pk>/access/", BusinessAccessView.as_view(), name="business-access"),
@@ -119,6 +122,16 @@ api_v1: list[URLPattern | URLResolver] = [
         name="template-detail",
     ),
     path("audit-logs/", AuditLogListView.as_view(), name="audit-log-list"),
+    path(
+        "invitations/<uuid:pk>/",
+        invitations_api.InvitationPreviewView.as_view(),
+        name="invitation-preview",
+    ),
+    path(
+        "invitations/<uuid:pk>/accept/",
+        invitations_api.InvitationAcceptView.as_view(),
+        name="invitation-accept",
+    ),
     path("analytics/", include("apps.analytics.urls")),
     path("campaigns/", include("apps.campaigns.urls")),
     path("audiences/", include("apps.campaigns.audience_urls")),

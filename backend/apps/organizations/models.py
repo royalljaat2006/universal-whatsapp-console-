@@ -106,3 +106,57 @@ class Membership(TenantScopedModel):
 
     def __str__(self) -> str:
         return f"{self.user_id} @ {self.organization_id}"
+
+
+class Invitation(TenantScopedModel):
+    """A pending invite for an email address to join the organization. The raw
+    token is shown to the inviter exactly once (see services.create_invitation)
+    and only its hash is ever stored — the same discipline as an API key."""
+
+    class Status(models.TextChoices):
+        PENDING = "pending", "Pending"
+        ACCEPTED = "accepted", "Accepted"
+        REVOKED = "revoked", "Revoked"
+
+    email = models.EmailField(max_length=254)
+    role = models.ForeignKey(Role, on_delete=models.PROTECT, related_name="invitations")
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING)
+    token_hash = models.CharField(max_length=64, editable=False)
+    business_scope = models.CharField(
+        max_length=16,
+        choices=Membership.BusinessScope.choices,
+        default=Membership.BusinessScope.ALL,
+    )
+    # Business ids granted on acceptance when business_scope=SELECTED (mirrors
+    # add_member's `businesses` argument; kept as a plain id list rather than a
+    # through-table since these are proposed grants, not yet real access).
+    business_ids = models.JSONField(default=list, blank=True)
+    invited_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, related_name="+"
+    )
+    accepted_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="+",
+    )
+    expires_at = models.DateTimeField()
+    accepted_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        constraints = [
+            # One outstanding invite per email at a time; revoke-and-reinvite
+            # is the path to change role/businesses before it's accepted.
+            models.UniqueConstraint(
+                fields=["organization", "email"],
+                condition=models.Q(status="pending"),
+                name="invitation_org_email_pending_unique",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["organization", "status"], name="invitation_org_status_idx")
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.email} -> {self.organization_id} ({self.status})"

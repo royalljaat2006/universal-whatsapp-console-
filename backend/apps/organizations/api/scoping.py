@@ -59,7 +59,14 @@ def resolve_business(request: Request, membership: Membership) -> Business | Non
 class HasOrganizationPermission(BasePermission):
     """Checks ``view.required_permissions[action]`` (or ``["*"]``) against the
     membership's role. Views without a declared permission are denied —
-    forgetting to declare one fails closed."""
+    forgetting to declare one fails closed.
+
+    When the request was authenticated by an API key (apps.apikeys), the
+    key's own ``scopes`` are also checked — a key can only ever narrow what
+    its creator's role already allows, never widen it. Duck-typed (checking
+    for a ``scopes`` attribute) rather than importing ApiKey, so this module
+    does not depend on the apikeys app.
+    """
 
     def has_permission(self, request: Request, view: Any) -> bool:
         membership: Membership | None = getattr(request, "membership", None)
@@ -72,6 +79,9 @@ class HasOrganizationPermission(BasePermission):
             raise PermissionDenied("This action is not permitted.")
         if not has_permission(membership, code):
             raise PermissionDenied(f"Missing permission: {code}")
+        scopes = getattr(request.auth, "scopes", None)
+        if scopes is not None and code not in scopes:
+            raise PermissionDenied(f"API key is not scoped for: {code}")
         return True
 
 

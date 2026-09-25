@@ -8,6 +8,8 @@ no CORS and tokens are never exposed to JavaScript (ADR-007).
 from typing import Any
 
 from django.contrib.auth import authenticate, login, logout
+from django.core.exceptions import ValidationError as DjangoValidationError
+from django.db import IntegrityError
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import ensure_csrf_cookie
 from rest_framework import serializers, status
@@ -22,7 +24,8 @@ from rest_framework.views import APIView
 from apps.audit import actions
 from apps.audit.services import record as audit
 from apps.identity.models import User
-from core.exceptions import DomainError
+from apps.organizations.services import create_organization, unique_organization_slug
+from core.exceptions import ConflictError, DomainError
 
 
 class InvalidCredentialsError(DomainError):
@@ -34,6 +37,13 @@ class InvalidCredentialsError(DomainError):
 class LoginSerializer(serializers.Serializer):
     email = serializers.EmailField()
     password = serializers.CharField(trim_whitespace=False, max_length=512)
+
+
+class RegisterSerializer(serializers.Serializer):
+    email = serializers.EmailField()
+    password = serializers.CharField(trim_whitespace=False, max_length=512, min_length=10)
+    full_name = serializers.CharField(max_length=200, allow_blank=True, default="")
+    organization_name = serializers.CharField(max_length=200)
 
 
 class UserSerializer(serializers.ModelSerializer):
@@ -81,6 +91,37 @@ class LoginView(APIView):
         login(request, user)
         audit(actions.AUTH_LOGIN_SUCCEEDED, actor=user, resource=user, request=request)
         return Response(UserSerializer(user).data)
+
+
+class RegisterView(APIView):
+    """Self-serve signup: creates a brand-new account *and* a brand-new
+    organization (the caller becomes its owner). Joining an *existing*
+    organization goes through an invitation instead
+    (apps.organizations.api.invitations) — this endpoint never attaches a new
+    user to someone else's organization."""
+
+    permission_classes = [AllowAny]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "auth"
+
+    def post(self, request: Request, *args: Any, **kwargs: Any) -> Response:
+        enforce_csrf(request)
+        payload = RegisterSerializer(data=request.data)
+        payload.is_valid(raise_exception=True)
+        email = payload.validated_data["email"].lower()
+        try:
+            user = User.objects.create_user(
+                email=email,
+                password=payload.validated_data["password"],
+                full_name=payload.validated_data.get("full_name", ""),
+            )
+        except (IntegrityError, DjangoValidationError) as exc:
+            raise ConflictError("An account with this email already exists.") from exc
+        slug = unique_organization_slug(payload.validated_data["organization_name"])
+        create_organization(name=payload.validated_data["organization_name"], owner=user, slug=slug)
+        login(request, user)
+        audit(actions.AUTH_REGISTERED, actor=user, resource=user, request=request)
+        return Response(UserSerializer(user).data, status=status.HTTP_201_CREATED)
 
 
 class LogoutView(APIView):
