@@ -14,7 +14,7 @@ variables (see `.env.example`). The images contain no secrets.
 |---|---|---|
 | backend | `infrastructure/docker/backend/Dockerfile` `production` | web (uvicorn ASGI: HTTP + WebSocket), `celery worker`, `celery beat` via the command. Non-root, static files collected, healthcheck on `/health/live` |
 | frontend | `infrastructure/docker/frontend/Dockerfile` `production` | Next.js standalone `node server.js`, non-root |
-| nginx | `nginx:1.27-alpine` + `infrastructure/nginx/nginx.conf` | TLS termination (add certs in prod), routing, webhook rate limit |
+| nginx | `nginx:1.27-alpine` + `infrastructure/nginx/nginx.conf.template` | TLS termination (add certs in prod), routing, webhook rate limit |
 
 ## Production topology (minimum)
 
@@ -50,6 +50,31 @@ PostgreSQL (managed, PITR backups)   Redis (AOF on; noeviction)
 - Readiness: `GET /health/ready` (DB, pending migrations, Redis).
 - `GET /health/dependencies` (staff): adds Celery worker ping and Meta
   configuration presence.
+
+## Deploying under a path prefix (shared gateway)
+
+When an outer reverse proxy publishes this app at a subpath instead of its
+own domain/root (e.g. `https://host/whatsapp-console/` on a box that hosts
+several unrelated apps), set `BASE_PATH=/whatsapp-console` (no trailing
+slash) wherever the stack is built and run:
+
+- Frontend image: pass `--build-arg BASE_PATH=/whatsapp-console
+  --build-arg NEXT_PUBLIC_BASE_PATH=/whatsapp-console` (baked into the
+  Next.js build; also set `NEXT_PUBLIC_BASE_PATH` as a runtime env var for
+  any server-rendered code path).
+- `nginx` service: set `BASE_PATH` in its environment; `nginx.conf.template`
+  renders the prefix into its routing at container start via `envsubst`.
+- Django: `DJANGO_ALLOWED_HOSTS` / `DJANGO_CSRF_TRUSTED_ORIGINS` still use
+  the bare host — Django itself stays prefix-unaware; this project's own
+  nginx strips `BASE_PATH` before proxying to the backend and passes it
+  through unchanged to the frontend (which needs it for Next's `basePath`
+  routing).
+- The **outer** gateway must forward the full incoming path unchanged
+  (no prefix-stripping — `proxy_pass http://127.0.0.1:<port>;`, no trailing
+  slash) since this project's own nginx expects to see `BASE_PATH` itself.
+- Leave `BASE_PATH` unset for a standard root deployment; every path above
+  degrades to its current unprefixed form (verified: the template renders
+  byte-identical routing when `BASE_PATH=""`).
 
 ## Checklist before go-live
 

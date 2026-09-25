@@ -100,8 +100,15 @@ services:
   nginx:
     # >= 1.27.3 required: upstream `resolve` (re-resolve restarted containers).
     image: nginx:1.27-alpine
+    environment:
+      # Empty in local dev (paths at the root). Set to a subpath only when
+      # reverse-proxied under one without prefix-stripping — docs/deployment.md.
+      BASE_PATH: ${BASE_PATH:-}
     volumes:
-      - ./infrastructure/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./infrastructure/nginx/nginx.conf.template:/etc/nginx/nginx.conf.template:ro
+    # Render the template (envsubst restricted to $BASE_PATH so nginx's own
+    # runtime variables, e.g. $scheme, are left untouched) before starting.
+    command: ["sh", "-c", "envsubst '$$BASE_PATH' < /etc/nginx/nginx.conf.template > /etc/nginx/nginx.conf && exec nginx -g 'daemon off;'"]
     ports:
       - "127.0.0.1:8080:80"
     depends_on:

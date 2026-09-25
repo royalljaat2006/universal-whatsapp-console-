@@ -14,6 +14,13 @@ CMD ["npm", "run", "dev", "--", "--hostname", "0.0.0.0", "--port", "3000"]
 
 # ---- build ---------------------------------------------------------------
 FROM base AS build
+# Set only when reverse-proxied under a subpath (see docs/deployment.md).
+# Baked into the client bundle at build time — must match the reverse
+# proxy's mount point exactly.
+ARG BASE_PATH=""
+ARG NEXT_PUBLIC_BASE_PATH=""
+ENV BASE_PATH=$BASE_PATH
+ENV NEXT_PUBLIC_BASE_PATH=$NEXT_PUBLIC_BASE_PATH
 COPY frontend/package.json frontend/package-lock.json ./
 RUN --mount=type=cache,target=/root/.npm npm ci
 COPY frontend/ ./
