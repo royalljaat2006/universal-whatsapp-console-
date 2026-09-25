@@ -753,6 +753,19 @@ export interface PlatformOrganization {
   created_at: ISODateTime;
 }
 
+export type OrgRoleKey = "owner" | "admin" | "manager" | "agent" | "viewer";
+
+export interface ProvisionedOrganization extends PlatformOrganization {
+  invitation: {
+    id: UUID;
+    email: string;
+    role: OrgRoleKey;
+    /** Shown exactly once — only its hash is ever stored server-side. */
+    token: string;
+    accept_path: string;
+  };
+}
+
 export interface PlatformAuditEntry {
   id: UUID;
   actor_type: string;

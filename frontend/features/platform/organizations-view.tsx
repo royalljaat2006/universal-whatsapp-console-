@@ -1,8 +1,9 @@
 "use client";
 
-import { Building2Icon } from "lucide-react";
+import { Building2Icon, PlusIcon } from "lucide-react";
 import { useMemo, useState } from "react";
 
+import { Button } from "@/components/ui/button";
 import { PageHeader, Panel, SearchInput, Toolbar } from "@/components/ui/page";
 import { EmptyState, ErrorState, TableSkeleton } from "@/components/ui/states";
 import { StatusBadge } from "@/components/ui/status-badge";
@@ -10,9 +11,10 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { useApiQuery } from "@/hooks/use-api-query";
 import { platformService } from "@/services/platform";
 
+import { OrganizationCreate } from "./organization-create-view";
 import { OrganizationDetail } from "./organization-detail-view";
 
-type Mode = { kind: "list" } | { kind: "detail"; id: string };
+type Mode = { kind: "list" } | { kind: "detail"; id: string } | { kind: "create" };
 
 export function OrganizationsView() {
   const [mode, setMode] = useState<Mode>({ kind: "list" });
@@ -31,11 +33,28 @@ export function OrganizationsView() {
     return <OrganizationDetail organizationId={mode.id} onBack={() => setMode({ kind: "list" })} />;
   }
 
+  if (mode.kind === "create") {
+    return (
+      <OrganizationCreate
+        onBack={() => setMode({ kind: "list" })}
+        onCreated={() => {
+          setMode({ kind: "list" });
+          orgs.reload();
+        }}
+      />
+    );
+  }
+
   return (
     <div className="flex flex-col gap-5">
       <PageHeader
         title="Organizations"
         description="Every tenant on the platform. Suspending an organization locks out all of its members immediately."
+        actions={
+          <Button onClick={() => setMode({ kind: "create" })}>
+            <PlusIcon aria-hidden /> New organization
+          </Button>
+        }
       />
       <Panel bodyClassName="overflow-x-auto">
         <Toolbar>
