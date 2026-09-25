@@ -6,7 +6,7 @@ from typing import Any
 import pytest
 from rest_framework.test import APIClient
 
-from apps.organizations.models import Organization
+from apps.organizations.models import Membership, Organization
 from tests import factories
 from tests.conftest import api_client_for
 
@@ -129,3 +129,98 @@ class TestOperationsAndAuditLogs:
         )
         assert all(e.get("organization") == str(organization.pk) for e in results)
         assert str(other.pk) not in {e.get("organization") for e in results}
+
+
+class TestProvisionOrganization:
+    def test_creates_org_with_no_members_and_returns_a_one_time_invite(self) -> None:
+        response = _staff_client().post(
+            "/api/v1/platform/organizations/",
+            {"name": "Acme Co", "owner_email": "founder@acme.example", "role_key": "owner"},
+            format="json",
+        )
+        assert response.status_code == 201
+        body = response.json()
+        assert body["member_count"] == 0
+        assert body["status"] == "active"
+        assert body["invitation"]["email"] == "founder@acme.example"
+        assert body["invitation"]["role"] == "owner"
+        assert len(body["invitation"]["token"]) > 20
+
+        org = Organization.objects.get(slug=body["slug"])
+        assert not Membership.objects.filter(organization=org).exists()
+
+    def test_default_role_is_owner(self) -> None:
+        response = _staff_client().post(
+            "/api/v1/platform/organizations/",
+            {"name": "No Role Specified", "owner_email": "x@example.com"},
+            format="json",
+        )
+        assert response.json()["invitation"]["role"] == "owner"
+
+    def test_can_provision_with_a_restricted_starting_role(self) -> None:
+        response = _staff_client().post(
+            "/api/v1/platform/organizations/",
+            {
+                "name": "Restricted Co",
+                "owner_email": "restricted@example.com",
+                "role_key": "viewer",
+            },
+            format="json",
+        )
+        assert response.status_code == 201
+        assert response.json()["invitation"]["role"] == "viewer"
+
+    def test_invited_user_can_accept_and_gets_exactly_that_role(self) -> None:
+        created = (
+            _staff_client()
+            .post(
+                "/api/v1/platform/organizations/",
+                {"name": "Accept Me", "owner_email": "acceptor@example.com", "role_key": "manager"},
+                format="json",
+            )
+            .json()
+        )
+        invite = created["invitation"]
+        response = APIClient().post(
+            f"/api/v1/invitations/{invite['id']}/accept/",
+            {"token": invite["token"], "password": "correct-horse-battery-staple"},
+            format="json",
+        )
+        assert response.status_code == 200
+        assert response.json()["role"] == "manager"
+
+    def test_unknown_role_key_is_rejected(self) -> None:
+        response = _staff_client().post(
+            "/api/v1/platform/organizations/",
+            {"name": "Bad Role", "owner_email": "x@example.com", "role_key": "not-a-real-role"},
+            format="json",
+        )
+        assert response.status_code == 400
+
+    def test_regular_owner_cannot_provision_organizations(
+        self, owner: Any, organization: Any
+    ) -> None:
+        response = api_client_for(owner, organization).post(
+            "/api/v1/platform/organizations/",
+            {"name": "Sneaky", "owner_email": "x@example.com"},
+            format="json",
+        )
+        assert response.status_code == 403
+
+    def test_provisioning_is_audit_logged(self) -> None:
+        created = (
+            _staff_client()
+            .post(
+                "/api/v1/platform/organizations/",
+                {"name": "Audited Co", "owner_email": "audited@example.com"},
+                format="json",
+            )
+            .json()
+        )
+        results = (
+            _staff_client()
+            .get(f"/api/v1/platform/audit-logs/?organization_id={created['id']}")
+            .json()["results"]
+        )
+        assert any(e["action"] == "organization.created" for e in results)
+        assert any(e["action"] == "invitation.created" for e in results)

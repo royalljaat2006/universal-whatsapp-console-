@@ -299,6 +299,36 @@ def accept_invitation(
     return membership, user
 
 
+@transaction.atomic
+def provision_organization(
+    *, name: str, invited_email: str, role_key: str, invited_by: Any
+) -> tuple[Organization, Invitation, str]:
+    """Platform-admin path (apps.platform): create an organization with no
+    members yet, then invite its first user with a chosen starting role —
+    lets an admin hand a brand-new tenant limited permissions from day one,
+    rather than always granting full owner access immediately. Unlike
+    create_organization, there is no owner argument: the invited user creates
+    their own password on acceptance, exactly like a teammate invitation."""
+    slug = unique_organization_slug(name)
+    sync_permission_catalogue()
+    organization = Organization.objects.create(name=name, slug=slug)
+    seed_default_roles(organization)
+    audit(
+        actions.ORGANIZATION_CREATED,
+        organization=organization,
+        actor=invited_by,
+        resource=organization,
+        metadata={"provisioned_for": invited_email, "role": role_key},
+    )
+    invitation, raw_token = create_invitation(
+        organization=organization,
+        email=invited_email,
+        role_key=role_key,
+        invited_by=invited_by,
+    )
+    return organization, invitation, raw_token
+
+
 def unique_organization_slug(name: str) -> str:
     """A slugified name, disambiguated with a short random suffix on
     collision — used by self-serve registration where two customers may

@@ -1,6 +1,7 @@
 """Platform (super-admin) console — cross-tenant, staff-only.
 
 GET   /api/v1/platform/organizations/           directory (member/business counts)
+POST  /api/v1/platform/organizations/           provision a new org + invite its first user
 GET   /api/v1/platform/organizations/<id>/      detail
 PATCH /api/v1/platform/organizations/<id>/      {"status": "active"|"suspended"}
 GET   /api/v1/platform/audit-logs/              cross-organization audit trail
@@ -27,6 +28,8 @@ from apps.audit.models import AuditLog
 from apps.audit.services import record as audit
 from apps.businesses.models import Business
 from apps.organizations.models import Membership, Organization
+from apps.organizations.permissions import DEFAULT_ROLES
+from apps.organizations.services import provision_organization
 from apps.platform.permissions import IsPlatformAdmin
 from apps.webhooks.models import WebhookEvent
 from core.exceptions import NotFoundError
@@ -50,6 +53,15 @@ class OrganizationDirectorySerializer(serializers.ModelSerializer):
             "created_at",
         ]
         read_only_fields = fields
+
+
+class ProvisionOrganizationSerializer(serializers.Serializer):
+    name = serializers.CharField(max_length=200)
+    owner_email = serializers.EmailField()
+    # Must be one of the 5 roles seeded on every new organization — a truly
+    # custom role can't exist yet for an org that doesn't exist yet. The
+    # invited user can create custom roles themselves once they accept.
+    role_key = serializers.ChoiceField(choices=list(DEFAULT_ROLES), default="owner")
 
 
 class OrganizationDirectoryView(generics.ListAPIView):
@@ -83,6 +95,27 @@ class OrganizationDirectoryView(generics.ListAPIView):
                 organization.pk, 0
             )
         return organizations  # type: ignore[return-value]
+
+    def post(self, request: Request, *args: Any, **kwargs: Any) -> Response:
+        payload = ProvisionOrganizationSerializer(data=request.data)
+        payload.is_valid(raise_exception=True)
+        organization, invitation, raw_token = provision_organization(
+            name=payload.validated_data["name"],
+            invited_email=payload.validated_data["owner_email"],
+            role_key=payload.validated_data["role_key"],
+            invited_by=request.user,
+        )
+        organization.member_count = 0  # type: ignore[attr-defined]
+        organization.business_count = 0  # type: ignore[attr-defined]
+        body = OrganizationDirectorySerializer(organization).data
+        body["invitation"] = {
+            "id": str(invitation.pk),
+            "email": invitation.email,
+            "role": invitation.role.key,
+            "token": raw_token,
+            "accept_path": f"/invitations/{invitation.pk}/accept?token={raw_token}",
+        }
+        return Response(body, status=status.HTTP_201_CREATED)
 
 
 class UpdateOrganizationStatusSerializer(serializers.Serializer):
