@@ -14,6 +14,12 @@ const nextConfig: NextConfig = {
   output: "standalone",
   poweredByHeader: false,
   basePath,
+  // Under a subpath, Next's own canonical root redirects /base -> /base/
+  // (dropping no slash). Match that direction in the outer reverse proxy's
+  // /base -> /base/ redirect (docs/deployment.md) instead of fighting it —
+  // opposite settings here would 308/301 loop forever. Unset at the root
+  // (no basePath), matching today's tested behavior exactly.
+  trailingSlash: basePath ? true : undefined,
   // The floating dev badge overlaps the sidebar during visual QA.
   devIndicators: false,
   async rewrites() {
