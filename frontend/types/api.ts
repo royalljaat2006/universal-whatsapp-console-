@@ -739,3 +739,43 @@ export interface ExportJob {
   created_at: ISODateTime;
   download_url: string | null;
 }
+
+// --- Platform (super-admin) console — cross-tenant, is_staff only ----------
+
+export interface PlatformOrganization {
+  id: UUID;
+  name: string;
+  slug: string;
+  status: "active" | "suspended";
+  timezone: string;
+  member_count: number;
+  business_count: number;
+  created_at: ISODateTime;
+}
+
+export interface PlatformAuditEntry {
+  id: UUID;
+  actor_type: string;
+  actor_email: string | null;
+  action: string;
+  resource_type: string;
+  resource_id: string;
+  metadata: Record<string, unknown>;
+  ip_address: string | null;
+  request_id: string | null;
+  created_at: ISODateTime;
+  organization: UUID | null;
+}
+
+export interface HealthCheckResult {
+  ok: boolean;
+  critical: boolean;
+  duration_ms: number;
+  detail?: string;
+}
+
+export interface OperationsSummary {
+  organizations: { total: number; active: number; suspended: number };
+  webhooks_last_24h: { dead: number; failed: number; processed: number; partial: number };
+  infrastructure: Record<string, HealthCheckResult>;
+}

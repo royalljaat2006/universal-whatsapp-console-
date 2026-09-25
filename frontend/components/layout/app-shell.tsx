@@ -246,7 +246,19 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               ) : (
                 <div className="p-8">
                   <p className="text-supporting">
-                    Your account has no active organization membership. Ask an administrator to add you.
+                    Your account has no active organization membership.
+                    {user?.is_staff ? (
+                      <>
+                        {" "}
+                        As a platform administrator, use the{" "}
+                        <Link href="/platform" className="text-primary underline underline-offset-2">
+                          platform console
+                        </Link>{" "}
+                        instead.
+                      </>
+                    ) : (
+                      " Ask an administrator to add you."
+                    )}
                   </p>
                 </div>
               )}

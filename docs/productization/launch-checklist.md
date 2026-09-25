@@ -10,6 +10,7 @@ not available in this cycle), **N/A**.
 | Multi-tenant org → business → WABA → number hierarchy | IMPLEMENTED, TESTED | Pre-existing (Cycle 1–3), unchanged |
 | Tenant isolation across API/jobs/WebSockets/exports/media | IMPLEMENTED, TESTED | Pre-existing boundary; extended to 3 new resources this cycle — see `tenant-isolation.md` |
 | Customer registration | IMPLEMENTED, TESTED | `POST /api/v1/auth/register/`; no frontend page yet |
+| Super admin console frontend | IMPLEMENTED | `/platform`, `/platform/audit-logs`, `/platform/operations` — org directory, suspend/reactivate (verified end-to-end with a real toggle), cross-org audit trail, live infra health. Gated on `is_staff`, own shell separate from the tenant console. Register/invite/accept/API-key pages are still backend-API-only |
 | Organization creation | IMPLEMENTED, TESTED | Via registration or pre-existing `create_organization` |
 | Team invitations | IMPLEMENTED, TESTED | Fixes a real pre-existing gap (see architecture-audit.md); no email sent (deferred) |
 | RBAC (named roles + permission catalogue) | IMPLEMENTED, TESTED | Catalogue and enforcement pre-existing; custom-role CRUD added this cycle |
@@ -32,7 +33,7 @@ not available in this cycle), **N/A**.
 | Monitoring and alerting | IMPLEMENTED (partial) | New read-only operations endpoint; no metrics pipeline or real alert delivery (no credentials) — see `monitoring.md` |
 | Backup and disaster recovery | BLOCKED / NOT DONE | No automation exists; documented as a gap, not closed — see `backup-and-recovery.md` |
 | Performance/scalability review | NOT DONE | Not attempted this cycle |
-| Frontend polish for new flows | NOT DONE | Backend-only cycle; no register/invite/API-key/admin-console UI yet |
+| Frontend polish for new flows | PARTIAL | Admin-console UI done (above); register/invite/accept/API-key pages still need frontend work |
 | Support/customer-ops tooling | NOT DONE | Not started this cycle |
 | Documentation | IMPLEMENTED | This directory |
 | Database migrations preserve existing data | TESTED | All migrations additive; `makemigrations --check` clean; full existing suite (325 tests) still passes unchanged |
