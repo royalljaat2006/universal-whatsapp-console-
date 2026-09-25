@@ -16,6 +16,9 @@ const MAX_BACKOFF_MS = 30_000;
 const HEARTBEAT_MS = 25_000;
 const AUTH_CLOSE_CODES = new Set([4401, 4403]);
 
+// Must match NEXT_PUBLIC_BASE_PATH used by lib/api/client.ts (see next.config.ts).
+const BASE_PATH = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
+
 export class RealtimeClient {
   private socket: WebSocket | null = null;
   private attempts = 0;
@@ -57,7 +60,7 @@ export class RealtimeClient {
   private open(): void {
     const protocol = window.location.protocol === "https:" ? "wss" : "ws";
     const query = new URLSearchParams({ organization: this.organizationId, business: this.businessId });
-    const url = `${protocol}://${window.location.host}/ws/v1/realtime/?${query.toString()}`;
+    const url = `${protocol}://${window.location.host}${BASE_PATH}/ws/v1/realtime/?${query.toString()}`;
     this.emitState("connecting");
     const socket = new WebSocket(url);
     this.socket = socket;

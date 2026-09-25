@@ -15,6 +15,14 @@ import { ApiError, toApiError } from "./errors";
 
 const UNSAFE_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 
+// Set only when reverse-proxied under a subpath (see next.config.ts). Not a
+// secret — just the public mount point — so NEXT_PUBLIC_ is safe here.
+const BASE_PATH = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
+
+function withBasePath(path: string): string {
+  return BASE_PATH ? `${BASE_PATH}${path}` : path;
+}
+
 let activeOrganizationId: string | null = null;
 let activeBusinessId: string | null = null;
 
@@ -48,7 +56,7 @@ export interface RequestOptions {
 }
 
 function buildUrl(path: string, query?: RequestOptions["query"]): string {
-  const url = new URL(path, "http://placeholder");
+  const url = new URL(withBasePath(path), "http://placeholder");
   for (const [key, value] of Object.entries(query ?? {})) {
     if (value !== undefined && value !== "") url.searchParams.set(key, String(value));
   }
@@ -107,7 +115,7 @@ export async function apiUpload<T>(path: string, form: FormData): Promise<T> {
   if (activeBusinessId) headers["X-Business-ID"] = activeBusinessId;
   let response: Response;
   try {
-    response = await fetch(path, { method: "POST", headers, body: form, credentials: "same-origin" });
+    response = await fetch(withBasePath(path), { method: "POST", headers, body: form, credentials: "same-origin" });
   } catch {
     throw new ApiError(0, "NETWORK_ERROR", "The server could not be reached.");
   }
@@ -126,7 +134,7 @@ export async function apiBlob(path: string, signal?: AbortSignal): Promise<Blob>
   if (activeBusinessId) headers["X-Business-ID"] = activeBusinessId;
   let response: Response;
   try {
-    response = await fetch(path, { headers, credentials: "same-origin", signal });
+    response = await fetch(withBasePath(path), { headers, credentials: "same-origin", signal });
   } catch (cause) {
     if (cause instanceof DOMException && cause.name === "AbortError") throw cause;
     throw new ApiError(0, "NETWORK_ERROR", "The server could not be reached.");

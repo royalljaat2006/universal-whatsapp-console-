@@ -5,10 +5,15 @@ import type { NextConfig } from "next";
 // /health and /ws to Django directly and these rewrites are never hit.
 const backend = process.env.BACKEND_INTERNAL_URL ?? "http://localhost:8000";
 
+// Set only when the app is reverse-proxied under a subpath (e.g. "/whatsapp-console").
+// Must match NEXT_PUBLIC_BASE_PATH used by lib/api/client.ts and lib/realtime/client.ts.
+const basePath = process.env.BASE_PATH || undefined;
+
 const nextConfig: NextConfig = {
   reactCompiler: true,
   output: "standalone",
   poweredByHeader: false,
+  basePath,
   // The floating dev badge overlaps the sidebar during visual QA.
   devIndicators: false,
   async rewrites() {
