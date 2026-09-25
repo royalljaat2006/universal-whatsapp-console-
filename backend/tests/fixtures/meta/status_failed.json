@@ -1,0 +1,26 @@
+{
+  "object": "whatsapp_business_account",
+  "entry": [{
+    "id": "{{WABA_ID}}",
+    "changes": [{
+      "value": {
+        "messaging_product": "whatsapp",
+        "metadata": {"display_phone_number": "15550783881", "phone_number_id": "{{PHONE_NUMBER_ID}}"},
+        "statuses": [{
+          "id": "{{WAMID}}",
+          "status": "failed",
+          "timestamp": "{{TS}}",
+          "recipient_id": "16505551234",
+          "errors": [{
+            "code": 131026,
+            "title": "Message undeliverable",
+            "message": "Message undeliverable",
+            "error_data": {"details": "Message Undeliverable."},
+            "href": "https://developers.facebook.com/docs/whatsapp/cloud-api/support/error-codes/"
+          }]
+        }]
+      },
+      "field": "messages"
+    }]
+  }]
+}

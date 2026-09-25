@@ -1,0 +1,87 @@
+[project]
+name = "whatsapp-platform-backend"
+version = "0.1.0"
+description = "Multi-tenant WhatsApp management platform — Django modular monolith"
+requires-python = ">=3.13,<3.14"
+dependencies = [
+    "django>=5.2.7,<5.3",               # LTS line (supported to April 2028)
+    "djangorestframework>=3.16,<3.19",
+    "django-environ>=0.12",
+    "psycopg[binary]>=3.2,<4",
+    "redis>=5.2",
+    "celery>=5.5,<5.7",
+    "channels>=4.2,<5",
+    "channels-redis>=4.2,<5",
+    "uvicorn[standard]>=0.34",
+    "httpx>=0.28,<1",
+    "cryptography>=44",
+    "drf-spectacular>=0.28",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "pytest-django>=4.9",
+    "ruff>=0.11",
+    "black>=25.1",
+    "mypy>=1.15",
+    "django-stubs[compatible-mypy]>=5.2,<5.3",
+    "djangorestframework-stubs>=3.16",
+    "celery-types>=0.23",
+    "daphne>=4.2.3",
+]
+
+[tool.uv]
+package = false
+
+# ---------------------------------------------------------------------------
+[tool.black]
+line-length = 100
+target-version = ["py313"]
+extend-exclude = "migrations"
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+extend-exclude = ["**/migrations/*"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "S", "DJ", "SIM", "RUF", "PTH", "T20"]
+ignore = [
+    "E501",   # black owns line length
+    "RUF012", # Django class attributes (Meta.ordering etc.) are idiomatic
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101", "S105", "S106", "S107", "S311"]
+"config/settings/test.py" = ["S105"]
+"core/ratelimit.py" = ["S105"]  # Lua script constant
+"config/settings/*" = ["F405", "F403"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["apps", "core", "config", "providers", "workers"]
+
+# ---------------------------------------------------------------------------
+[tool.mypy]
+python_version = "3.13"
+plugins = ["mypy_django_plugin.main", "mypy_drf_plugin.main"]
+check_untyped_defs = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+no_implicit_optional = true
+ignore_missing_imports = true
+exclude = ["migrations/", "tests/"]
+
+[tool.django-stubs]
+django_settings_module = "config.settings.test"
+
+# ---------------------------------------------------------------------------
+[tool.pytest.ini_options]
+DJANGO_SETTINGS_MODULE = "config.settings.test"
+python_files = ["test_*.py"]
+testpaths = ["tests"]
+addopts = "-ra --strict-markers"
+markers = [
+    "redis: requires a live Redis server",
+]
+filterwarnings = ["ignore::DeprecationWarning:environ.*"]

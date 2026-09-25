@@ -1,0 +1,5 @@
+.next
+node_modules
+package-lock.json
+components/ui
+next-env.d.ts
