@@ -300,6 +300,24 @@ export interface Contact {
   updated_at: ISODateTime;
 }
 
+export interface ContactImportJob {
+  id: UUID;
+  business_id: UUID;
+  filename: string;
+  tag_name: string;
+  status: "pending" | "running" | "succeeded" | "succeeded_with_errors" | "failed";
+  total_rows: number | null;
+  created_count: number;
+  updated_count: number;
+  failed_count: number;
+  row_errors: { row: number; error: string }[];
+  error: string;
+  started_at: ISODateTime | null;
+  finished_at: ISODateTime | null;
+  requested_by_email: string | null;
+  created_at: ISODateTime;
+}
+
 export interface ContactNote {
   id: UUID;
   body: string;
@@ -740,7 +758,12 @@ export interface SavedAudience {
 }
 
 export type ExportKind =
-  "campaign_recipients" | "campaign_summary" | "messages" | "costs" | "analytics_daily";
+  | "campaign_recipients"
+  | "campaign_summary"
+  | "messages"
+  | "costs"
+  | "analytics_daily"
+  | "contacts";
 
 export interface ExportJob {
   id: UUID;

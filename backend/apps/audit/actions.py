@@ -67,6 +67,8 @@ AUDIENCE_UPDATED = "audience.updated"
 AUDIENCE_DELETED = "audience.deleted"
 EXPORT_REQUESTED = "report.export_requested"
 EXPORT_DOWNLOADED = "report.export_downloaded"
+CONTACTS_IMPORT_REQUESTED = "contact.import_requested"
+CONTACTS_IMPORTED = "contact.imported"
 
 PRICING_RULE_CHANGED = "billing.pricing_rule_changed"
 WEBHOOK_REPLAYED = "webhook.replayed"

@@ -21,6 +21,7 @@ from apps.analytics.tracking import business_zone, day_bounds
 from apps.billing.models import MessageCost
 from apps.campaigns import reporting
 from apps.campaigns.models import Campaign, CampaignRecipient
+from apps.contacts.models import Contact
 from apps.media import storage
 from apps.messaging.models import Message
 from apps.reports.models import ExportJob
@@ -249,12 +250,44 @@ def analytics_daily(job: ExportJob) -> Iterator[Row]:
         ]
 
 
+def contacts(job: ExportJob) -> Iterator[Row]:
+    qs = Contact.objects.filter(business=job.business)
+    if job.params.get("tag_id"):
+        qs = qs.filter(tags__id=job.params["tag_id"])
+    yield [
+        "contact_id",
+        "display_name",
+        "profile_name",
+        "phone_number",
+        "country_code",
+        "opt_in_status",
+        "tags",
+        "first_seen_at",
+        "last_message_at",
+        "last_inbound_at",
+    ]
+    for c in qs.order_by("pk").iterator(chunk_size=CHUNK):
+        yield [
+            c.pk,
+            c.display_name,
+            c.profile_name,
+            c.phone_number,
+            c.country_code,
+            c.opt_in_status,
+            ",".join(c.tags.values_list("name", flat=True)),
+            _iso(c.created_at),
+            _iso(c.last_message_at),
+            _iso(c.last_inbound_at),
+        ]
+
+
 WRITERS: dict[str, Callable[[ExportJob], Iterator[Row]]] = {
     ExportJob.Kind.CAMPAIGN_RECIPIENTS: campaign_recipients,
     ExportJob.Kind.CAMPAIGN_SUMMARY: campaign_summary,
     ExportJob.Kind.MESSAGES: messages,
     ExportJob.Kind.COSTS: costs,
     ExportJob.Kind.ANALYTICS_DAILY: analytics_daily,
+    ExportJob.Kind.CONTACTS: contacts,
 }
 
 

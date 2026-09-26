@@ -40,6 +40,16 @@ api_v1: list[URLPattern | URLResolver] = [
         name="member-scope",
     ),
     path("contacts/", contacts_api.ContactListView.as_view(), name="contact-list"),
+    path(
+        "contacts/import/",
+        contacts_api.ContactImportListCreateView.as_view(),
+        name="contact-import-list",
+    ),
+    path(
+        "contacts/import/<uuid:pk>/",
+        contacts_api.ContactImportDetailView.as_view(),
+        name="contact-import-detail",
+    ),
     path("contacts/<uuid:pk>/", contacts_api.ContactDetailView.as_view(), name="contact-detail"),
     path(
         "contacts/<uuid:pk>/notes/", contacts_api.ContactNotesView.as_view(), name="contact-notes"

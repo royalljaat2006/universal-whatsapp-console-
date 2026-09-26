@@ -13,7 +13,9 @@ import { LoadingButton } from "@/components/ui/spinner";
 import { EmptyState, ErrorState, TableSkeleton } from "@/components/ui/states";
 import { StatusBadge, toneFor } from "@/components/ui/status-badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { ContactImportButton } from "@/features/contacts/contact-import-button";
 import { Notes } from "@/features/inbox/panel/contact-panel";
+import { ExportButton } from "@/features/reports/export-button";
 import { useApiQuery } from "@/hooks/use-api-query";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { apiRequest } from "@/lib/api/client";
@@ -35,9 +37,10 @@ function name(c: Contact): string {
 }
 
 /**
- * Contacts of the selected business. Contacts are created by real inbound
- * messages (or sends); every row is a real WhatsApp user who interacted with
- * one of the business's numbers.
+ * Contacts of the selected business. Most rows are created by real inbound
+ * messages (or sends) — a real WhatsApp user who interacted with one of the
+ * business's numbers — but a contact may also be created or enriched through
+ * a CSV import (contacts.manage), before any conversation exists.
  */
 export function ContactsView() {
   const { business, hasPermission } = useSession();
@@ -84,6 +87,12 @@ export function ContactsView() {
       <PageHeader
         title="Contacts"
         description={`Customers who have interacted with ${business.name}'s WhatsApp numbers.`}
+        actions={
+          <>
+            <ExportButton kind="contacts" params={{}} />
+            <ContactImportButton onImported={page.reload} />
+          </>
+        }
       />
       <Panel bodyClassName="overflow-x-auto">
         <Toolbar>
@@ -115,7 +124,7 @@ export function ContactsView() {
             description={
               q || tag
                 ? "Try a different search or tag."
-                : "Contacts are created when customers message this business's WhatsApp numbers."
+                : "Contacts are created when customers message this business's WhatsApp numbers, or by importing a CSV above."
             }
           />
         ) : (

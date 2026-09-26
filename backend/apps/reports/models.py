@@ -19,6 +19,7 @@ class ExportJob(TenantScopedModel):
         MESSAGES = "messages", "Messages"
         COSTS = "costs", "Message costs"
         ANALYTICS_DAILY = "analytics_daily", "Daily analytics"
+        CONTACTS = "contacts", "Contacts"
 
     class Status(models.TextChoices):
         PENDING = "pending", "Pending"

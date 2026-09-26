@@ -25,6 +25,7 @@ from apps.audit import actions
 from apps.audit.services import record as audit
 from apps.campaigns.models import Campaign
 from apps.contacts.api import BusinessRequiredError
+from apps.contacts.models import Tag
 from apps.media import storage
 from apps.organizations.api.scoping import OrganizationScopedMixin
 from apps.organizations.services import has_permission
@@ -40,6 +41,7 @@ DATA_PERMISSION = {
     ExportJob.Kind.MESSAGES: "conversations.view",
     ExportJob.Kind.COSTS: "billing.view",
     ExportJob.Kind.ANALYTICS_DAILY: "analytics.view",
+    ExportJob.Kind.CONTACTS: "contacts.view",
 }
 
 
@@ -139,7 +141,17 @@ class ExportListCreateView(OrganizationScopedMixin, generics.ListAPIView):
                 raise NotFoundError("campaign not found")
             slug = "recipients" if kind == ExportJob.Kind.CAMPAIGN_RECIPIENTS else "summary"
             return {"campaign_id": str(campaign.pk)}, f"campaign-{slug}-{campaign.pk}.csv"
-        params: dict[str, Any] = _dates(raw)
+        if kind == ExportJob.Kind.CONTACTS:
+            params: dict[str, Any] = {}
+            if raw.get("tag_id"):
+                if (
+                    not _is_uuid(raw["tag_id"])
+                    or not Tag.objects.filter(pk=raw["tag_id"], business=business).exists()
+                ):
+                    raise NotFoundError("tag not found")
+                params["tag_id"] = str(raw["tag_id"])
+            return params, "contacts.csv"
+        params = _dates(raw)
         if kind == ExportJob.Kind.MESSAGES:
             if raw.get("phone_number_id"):
                 if (

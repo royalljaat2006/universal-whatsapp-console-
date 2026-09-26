@@ -116,6 +116,44 @@ class ContactIdentity(TenantScopedModel):
         return f"{self.kind}:{self.value}"
 
 
+class ContactImportJob(TenantScopedModel):
+    """One CSV upload, processed asynchronously (mirrors apps.reports.ExportJob
+    for the read direction). ``row_errors`` is capped (see apps.contacts.
+    import_csv.MAX_REPORTED_ERRORS) — a huge bad file reports its first N
+    errors, not an unbounded list."""
+
+    class Status(models.TextChoices):
+        PENDING = "pending", "Pending"
+        RUNNING = "running", "Running"
+        SUCCEEDED = "succeeded", "Succeeded"
+        SUCCEEDED_WITH_ERRORS = "succeeded_with_errors", "Succeeded with errors"
+        FAILED = "failed", "Failed"
+
+    business = models.ForeignKey("businesses.Business", on_delete=models.CASCADE, related_name="+")
+    storage_key = models.CharField(max_length=512, blank=True)
+    filename = models.CharField(max_length=200, blank=True)
+    # Applied to every row imported by this job, in addition to any per-row
+    # "tags" column. Blank means no job-wide tag.
+    tag_name = models.CharField(max_length=64, blank=True)
+    status = models.CharField(max_length=24, choices=Status.choices, default=Status.PENDING)
+    total_rows = models.PositiveIntegerField(null=True, blank=True)
+    created_count = models.PositiveIntegerField(default=0)
+    updated_count = models.PositiveIntegerField(default=0)
+    failed_count = models.PositiveIntegerField(default=0)
+    row_errors = models.JSONField(default=list, blank=True)
+    error = models.CharField(max_length=500, blank=True)
+    started_at = models.DateTimeField(null=True, blank=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+    requested_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="+"
+    )
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["business", "-created_at"], name="contact_import_business_idx")
+        ]
+
+
 class ContactNote(TenantScopedModel):
     """Internal note about a contact (never sent to the customer)."""
 

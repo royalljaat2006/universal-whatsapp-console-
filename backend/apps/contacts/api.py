@@ -3,17 +3,25 @@
 import re
 from typing import Any
 
+from django.db import transaction
 from django.db.models import Count, Prefetch, Q, QuerySet
 from rest_framework import generics, serializers, status
+from rest_framework.parsers import MultiPartParser
 from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from apps.audit import actions
+from apps.audit.services import record as audit
 from apps.contacts import management_services as svc
-from apps.contacts.models import Contact, ContactIdentity, ContactNote, Tag
+from apps.contacts.models import Contact, ContactIdentity, ContactImportJob, ContactNote, Tag
 from apps.conversations.models import Conversation
+from apps.media import storage
 from apps.organizations.api.scoping import OrganizationScopedMixin
+from core.api.pagination import StandardCursorPagination
 from core.exceptions import DomainError, NotFoundError
+
+MAX_IMPORT_UPLOAD_BYTES = 5 * 1024 * 1024
 
 
 class BusinessRequiredError(DomainError):
@@ -257,3 +265,106 @@ class TagDetailView(OrganizationScopedMixin, APIView):
     def delete(self, request: Request, pk: str) -> Response:
         svc.delete_tag(self.tag(pk), actor=request.user)
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+# ---------------------------------------------------------------------------
+# CSV import
+# ---------------------------------------------------------------------------
+
+
+class ContactImportJobSerializer(serializers.ModelSerializer):
+    business_id = serializers.UUIDField(read_only=True)
+    requested_by_email = serializers.EmailField(
+        source="requested_by.email", read_only=True, default=None
+    )
+
+    class Meta:
+        model = ContactImportJob
+        fields = [
+            "id",
+            "business_id",
+            "filename",
+            "tag_name",
+            "status",
+            "total_rows",
+            "created_count",
+            "updated_count",
+            "failed_count",
+            "row_errors",
+            "error",
+            "started_at",
+            "finished_at",
+            "requested_by_email",
+            "created_at",
+        ]
+        read_only_fields = fields
+
+
+class ImportPagination(StandardCursorPagination):
+    ordering = ("-created_at", "-id")
+
+
+class ContactImportListCreateView(OrganizationScopedMixin, generics.ListAPIView):
+    """POST (multipart ``file``, optional ``tag_name``) queues a CSV import;
+    GET lists this business's import jobs, latest first."""
+
+    queryset_model = ContactImportJob
+    business_field = "business"
+    serializer_class = ContactImportJobSerializer
+    pagination_class = ImportPagination
+    parser_classes = [MultiPartParser]
+    required_permissions = {"get": "contacts.view", "post": "contacts.manage"}
+
+    def scope_queryset(self, queryset: QuerySet[Any]) -> QuerySet[Any]:
+        return queryset.select_related("requested_by")
+
+    def post(self, request: Request, *args: Any, **kwargs: Any) -> Response:
+        from apps.contacts.tasks import process_contact_import
+
+        if self.business is None:
+            raise BusinessRequiredError()
+        upload = request.FILES.get("file")
+        if upload is None:
+            raise DomainError("A file is required.")
+        if upload.size > MAX_IMPORT_UPLOAD_BYTES:
+            raise DomainError("File too large.")
+        tag_name = (request.data.get("tag_name") or "").strip()[:64]
+        key = storage.build_key(self.organization.pk, self.business.pk, ".csv")
+        stored = storage.save(key, upload.file)
+        with transaction.atomic():
+            job = ContactImportJob.objects.create(
+                organization=self.organization,
+                business=self.business,
+                storage_key=stored.key,
+                filename=(upload.name or "contacts.csv")[:200],
+                tag_name=tag_name,
+                requested_by=request.user if request.user.is_authenticated else None,
+            )
+            audit(
+                actions.CONTACTS_IMPORT_REQUESTED,
+                organization=self.organization,
+                actor=request.user,
+                resource=job,
+                metadata={"business_id": str(self.business.pk), "filename": job.filename},
+                request=request,
+            )
+            job_id = str(job.pk)
+            transaction.on_commit(lambda: process_contact_import.delay(job_id))
+        return Response(ContactImportJobSerializer(job).data, status=status.HTTP_202_ACCEPTED)
+
+
+class ContactImportDetailView(OrganizationScopedMixin, APIView):
+    required_permissions = {"get": "contacts.view"}
+
+    def get(self, request: Request, pk: str) -> Response:
+        job = (
+            self.restrict_to_businesses(
+                ContactImportJob.objects.for_organization(self.organization), "business"
+            )
+            .select_related("requested_by")
+            .filter(pk=pk)
+            .first()
+        )
+        if job is None:
+            raise NotFoundError("import job not found")
+        return Response(ContactImportJobSerializer(job).data)

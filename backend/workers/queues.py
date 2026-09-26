@@ -36,6 +36,7 @@ TASK_ROUTES = {
     "apps.templates.tasks.*": {"queue": "sync"},
     "apps.analytics.tasks.*": {"queue": "analytics"},
     "apps.reports.tasks.*": {"queue": "analytics"},
+    "apps.contacts.tasks.*": {"queue": "analytics"},
     "apps.billing.tasks.*": {"queue": "analytics"},
     "apps.notifications.tasks.*": {"queue": "default"},
     "apps.identity.tasks.*": {"queue": "default"},

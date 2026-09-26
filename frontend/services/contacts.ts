@@ -1,5 +1,5 @@
-import { api } from "@/lib/api/client";
-import type { Contact, ContactNote, CursorPage, InboxConversation, Tag } from "@/types/api";
+import { api, apiUpload } from "@/lib/api/client";
+import type { Contact, ContactImportJob, ContactNote, CursorPage, InboxConversation, Tag } from "@/types/api";
 
 export const contactService = {
   list: (query: { q?: string; tag?: string } = {}) =>
@@ -13,6 +13,17 @@ export const contactService = {
   addTag: (id: string, tagId: string) => api.post<Contact>(`/api/v1/contacts/${id}/tags/`, { tag_id: tagId }),
   removeTag: (id: string, tagId: string) => api.delete<Contact>(`/api/v1/contacts/${id}/tags/${tagId}/`),
   history: (id: string) => api.get<InboxConversation[]>(`/api/v1/contacts/${id}/history/`),
+};
+
+export const contactImportService = {
+  list: () => api.get<CursorPage<ContactImportJob>>("/api/v1/contacts/import/"),
+  get: (id: string) => api.get<ContactImportJob>(`/api/v1/contacts/import/${id}/`),
+  upload: (file: File, tagName?: string) => {
+    const form = new FormData();
+    form.append("file", file);
+    if (tagName) form.append("tag_name", tagName);
+    return apiUpload<ContactImportJob>("/api/v1/contacts/import/", form);
+  },
 };
 
 export const tagService = {
