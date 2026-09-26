@@ -23,8 +23,9 @@ import { authService } from "@/services/auth";
 import { businessService } from "@/services/businesses";
 import { teamInvitationService } from "@/services/invitations";
 import { organizationService } from "@/services/organizations";
+import { roleService } from "@/services/roles";
 import { useSession } from "@/stores/session-context";
-import type { CreatedInvitation, CursorPage, OrgRoleKey } from "@/types/api";
+import type { CreatedInvitation, CursorPage, OrgRoleKey, PermissionCatalogueEntry, Role } from "@/types/api";
 
 export function Workspace() {
   const { active, businesses, user, hasPermission, refreshBusinesses } = useSession();
@@ -529,5 +530,206 @@ export function AuditLog() {
         </Table>
       ) : null}
     </Panel>
+  );
+}
+
+function groupPermissions(catalogue: PermissionCatalogueEntry[]): [string, PermissionCatalogueEntry[]][] {
+  const groups = new Map<string, PermissionCatalogueEntry[]>();
+  for (const entry of catalogue) {
+    const group = entry.code.split(".")[0] ?? entry.code;
+    (groups.get(group) ?? groups.set(group, []).get(group)!).push(entry);
+  }
+  return [...groups.entries()].sort(([a], [b]) => a.localeCompare(b));
+}
+
+function RoleForm({
+  catalogue,
+  initial,
+  submitLabel,
+  busy,
+  onSubmit,
+  onCancel,
+}: {
+  catalogue: PermissionCatalogueEntry[];
+  initial: { name: string; description: string; permissions: string[] };
+  submitLabel: string;
+  busy: boolean;
+  onSubmit: (values: { name: string; description: string; permissions: string[] }) => void;
+  onCancel?: () => void;
+}) {
+  const [name, setName] = useState(initial.name);
+  const [description, setDescription] = useState(initial.description);
+  const [permissions, setPermissions] = useState(new Set(initial.permissions));
+  const groups = groupPermissions(catalogue);
+
+  function toggle(code: string) {
+    setPermissions((prev) => {
+      const next = new Set(prev);
+      if (next.has(code)) next.delete(code);
+      else next.add(code);
+      return next;
+    });
+  }
+
+  return (
+    <form
+      className="flex flex-col gap-3"
+      onSubmit={(e) => {
+        e.preventDefault();
+        onSubmit({ name: name.trim(), description: description.trim(), permissions: [...permissions] });
+      }}
+    >
+      <div className="flex flex-wrap gap-2">
+        <div className="flex min-w-48 flex-1 flex-col gap-1.5">
+          <Label htmlFor="role-name">Name</Label>
+          <Input id="role-name" required value={name} onChange={(e) => setName(e.target.value)} />
+        </div>
+        <div className="flex min-w-48 flex-[2] flex-col gap-1.5">
+          <Label htmlFor="role-description">Description</Label>
+          <Input
+            id="role-description"
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+          />
+        </div>
+      </div>
+      <div className="flex flex-col gap-2">
+        <Label>Permissions</Label>
+        <div className="grid gap-3 rounded-md border p-3 sm:grid-cols-2 lg:grid-cols-3">
+          {groups.map(([group, entries]) => (
+            <div key={group} className="flex flex-col gap-1">
+              <span className="text-caption font-medium capitalize">{group}</span>
+              {entries.map((entry) => (
+                <label key={entry.code} className="flex items-start gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    className="mt-0.5"
+                    checked={permissions.has(entry.code)}
+                    onChange={() => toggle(entry.code)}
+                  />
+                  <span>{entry.description}</span>
+                </label>
+              ))}
+            </div>
+          ))}
+        </div>
+      </div>
+      <div className="flex gap-2">
+        <LoadingButton type="submit" loading={busy} disabled={!name.trim()}>
+          {submitLabel}
+        </LoadingButton>
+        {onCancel ? (
+          <Button type="button" variant="ghost" onClick={onCancel}>
+            Cancel
+          </Button>
+        ) : null}
+      </div>
+    </form>
+  );
+}
+
+/** Custom roles: create/edit/delete organization-defined bundles of
+ * permissions. The five DEFAULT_ROLES (owner/admin/manager/agent/viewer) are
+ * ordinary rows here (is_system=true only blocks deletion, not editing). */
+export function Roles({ canManage }: { canManage: boolean }) {
+  const roles = useApiQuery(() => roleService.list(), []);
+  const catalogue = useApiQuery(() => roleService.permissions(), [], canManage);
+  const { run, error, busy } = useAction(roles.reload);
+  const [creating, setCreating] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+
+  return (
+    <div className="flex flex-col gap-4">
+      <Panel
+        title="Roles"
+        description="Bundles of permissions assigned to members. The five default roles can be edited but not deleted."
+        actions={
+          canManage && !creating ? (
+            <Button size="sm" onClick={() => setCreating(true)}>
+              New role
+            </Button>
+          ) : null
+        }
+      >
+        {roles.error ? (
+          <ErrorState error={roles.error} onRetry={roles.reload} inline className="m-4" />
+        ) : null}
+        {error ? <ErrorState error={error} inline className="mx-4 mt-2" /> : null}
+        {!roles.data && !roles.error ? <TableSkeleton rows={3} columns={4} /> : null}
+        {roles.data ? (
+          <ul className="divide-y">
+            {roles.data.map((role: Role) => (
+              <li key={role.id} className="flex flex-col gap-2 px-4 py-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="font-medium">{role.name}</span>
+                  {role.is_system ? <StatusBadge tone="info">default</StatusBadge> : null}
+                  <span className="text-caption">{role.permissions.length} permission(s)</span>
+                  {role.description ? (
+                    <span className="text-caption">· {role.description}</span>
+                  ) : null}
+                  {canManage ? (
+                    <span className="ml-auto flex gap-1">
+                      <Button
+                        size="xs"
+                        variant="ghost"
+                        onClick={() => setEditingId(editingId === role.id ? null : role.id)}
+                      >
+                        {editingId === role.id ? "Close" : "Edit"}
+                      </Button>
+                      {!role.is_system ? (
+                        <Button
+                          size="xs"
+                          variant="ghost"
+                          disabled={busy}
+                          onClick={() => {
+                            if (window.confirm(`Delete role "${role.name}"?`)) {
+                              void run(() => roleService.remove(role.id));
+                            }
+                          }}
+                        >
+                          Delete
+                        </Button>
+                      ) : null}
+                    </span>
+                  ) : null}
+                </div>
+                {editingId === role.id && catalogue.data ? (
+                  <RoleForm
+                    catalogue={catalogue.data}
+                    initial={{
+                      name: role.name,
+                      description: role.description,
+                      permissions: role.permissions,
+                    }}
+                    submitLabel="Save changes"
+                    busy={busy}
+                    onCancel={() => setEditingId(null)}
+                    onSubmit={(values) =>
+                      void run(() => roleService.update(role.id, values)).then(
+                        (ok) => ok && setEditingId(null),
+                      )
+                    }
+                  />
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        ) : null}
+      </Panel>
+      {creating && catalogue.data ? (
+        <Panel title="New role" bodyClassName="p-4">
+          <RoleForm
+            catalogue={catalogue.data}
+            initial={{ name: "", description: "", permissions: [] }}
+            submitLabel="Create role"
+            busy={busy}
+            onCancel={() => setCreating(false)}
+            onSubmit={(values) =>
+              void run(() => roleService.create(values)).then((ok) => ok && setCreating(false))
+            }
+          />
+        </Panel>
+      ) : null}
+    </div>
   );
 }

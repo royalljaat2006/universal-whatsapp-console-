@@ -12,6 +12,25 @@ from tests.conftest import api_client_for
 pytestmark = pytest.mark.django_db
 
 
+class TestPermissionCatalogue:
+    def test_lists_the_full_permission_catalogue(self, owner: Any, organization: Any) -> None:
+        response = api_client_for(owner, organization).get(
+            "/api/v1/organizations/current/permissions/"
+        )
+        assert response.status_code == 200
+        codes = {entry["code"] for entry in response.json()}
+        assert {"contacts.view", "contacts.manage", "billing.manage", "roles.manage"} <= codes
+        entry = next(e for e in response.json() if e["code"] == "contacts.manage")
+        assert entry["description"] == "Create, edit and tag contacts"
+
+    def test_agent_cannot_view_the_permission_catalogue(self, organization: Any) -> None:
+        agent = factories.make_member(organization, "agent")
+        response = api_client_for(agent, organization).get(
+            "/api/v1/organizations/current/permissions/"
+        )
+        assert response.status_code == 403
+
+
 class TestListCreate:
     def test_lists_the_five_seeded_default_roles(self, owner: Any, organization: Any) -> None:
         data = (

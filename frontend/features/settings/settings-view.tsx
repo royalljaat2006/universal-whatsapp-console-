@@ -5,6 +5,7 @@ import {
   KeyRoundIcon,
   type LucideIcon,
   ScrollTextIcon,
+  ShieldIcon,
   SmartphoneIcon,
   TagIcon,
   UserIcon,
@@ -25,9 +26,18 @@ import { tagService } from "@/services/contacts";
 import { cn } from "@/lib/utils";
 import { useSession } from "@/stores/session-context";
 
-import { AccountSettings, AuditLog, Members, WhatsAppSettings, Workspace } from "./settings-sections";
+import { AccountSettings, AuditLog, Members, Roles, WhatsAppSettings, Workspace } from "./settings-sections";
 
-type SectionId = "workspace" | "account" | "members" | "access" | "whatsapp" | "teams" | "tags" | "audit";
+type SectionId =
+  | "workspace"
+  | "account"
+  | "members"
+  | "roles"
+  | "access"
+  | "whatsapp"
+  | "teams"
+  | "tags"
+  | "audit";
 
 export function SettingsView() {
   const { business, hasPermission } = useSession();
@@ -37,6 +47,7 @@ export function SettingsView() {
     // organization permission.
     { id: "account", label: "Your account", icon: UserIcon, allowed: true },
     { id: "members", label: "Members", icon: UserPlusIcon, allowed: hasPermission("members.view") },
+    { id: "roles", label: "Roles", icon: ShieldIcon, allowed: hasPermission("roles.manage") },
     { id: "access", label: "Business access", icon: KeyRoundIcon, allowed: hasPermission("members.manage") },
     {
       id: "whatsapp",
@@ -83,6 +94,7 @@ export function SettingsView() {
           {active?.id === "workspace" ? <Workspace /> : null}
           {active?.id === "account" ? <AccountSettings /> : null}
           {active?.id === "members" ? <Members canManage={hasPermission("members.manage")} /> : null}
+          {active?.id === "roles" ? <Roles canManage={hasPermission("roles.manage")} /> : null}
           {active?.id === "access" ? (
             business ? (
               <BusinessAccess businessId={business.id} />

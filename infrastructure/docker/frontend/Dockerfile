@@ -21,6 +21,10 @@ ARG BASE_PATH=""
 ARG NEXT_PUBLIC_BASE_PATH=""
 ENV BASE_PATH=$BASE_PATH
 ENV NEXT_PUBLIC_BASE_PATH=$NEXT_PUBLIC_BASE_PATH
+# Support contact shown in the Help & Support menu. Empty means the console
+# shows "not configured yet" instead of a broken mailto: link.
+ARG NEXT_PUBLIC_SUPPORT_EMAIL=""
+ENV NEXT_PUBLIC_SUPPORT_EMAIL=$NEXT_PUBLIC_SUPPORT_EMAIL
 COPY frontend/package.json frontend/package-lock.json ./
 RUN --mount=type=cache,target=/root/.npm npm ci
 COPY frontend/ ./

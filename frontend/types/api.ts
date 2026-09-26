@@ -44,6 +44,21 @@ export interface MyMembership {
   permissions: string[];
 }
 
+export interface Role {
+  id: UUID;
+  key: string;
+  name: string;
+  description: string;
+  is_system: boolean;
+  permissions: string[];
+  created_at: ISODateTime;
+}
+
+export interface PermissionCatalogueEntry {
+  code: string;
+  description: string;
+}
+
 export interface Business {
   id: UUID;
   name: string;

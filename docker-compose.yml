@@ -89,6 +89,7 @@ services:
     environment:
       BACKEND_INTERNAL_URL: http://backend:8000
       WATCHPACK_POLLING: "true"
+      NEXT_PUBLIC_SUPPORT_EMAIL: ${NEXT_PUBLIC_SUPPORT_EMAIL:-}
     volumes:
       - ./frontend:/app
       - frontend-node-modules:/app/node_modules

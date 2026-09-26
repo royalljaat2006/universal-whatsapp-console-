@@ -55,6 +55,25 @@ def _validate_permission_codes(codes: set[str]) -> None:
         raise serializers.ValidationError({"permissions": [str(exc)]}) from exc
 
 
+class PermissionSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Permission
+        fields = ["code", "description"]
+        read_only_fields = fields
+
+
+class PermissionCatalogueView(OrganizationScopedMixin, APIView):
+    """The full permission catalogue (code + description), for building a
+    role editor's permission picker. Same list for every organization —
+    Permission is a code-level catalogue, not tenant-owned data, so this
+    doesn't go through queryset_model/for_organization like tenant models."""
+
+    required_permissions = {"get": "roles.manage"}
+
+    def get(self, request: Request, *args: Any, **kwargs: Any) -> Response:
+        return Response(PermissionSerializer(Permission.objects.all(), many=True).data)
+
+
 class RoleListCreateView(OrganizationScopedMixin, generics.ListAPIView):
     queryset_model = Role
     serializer_class = RoleSerializer

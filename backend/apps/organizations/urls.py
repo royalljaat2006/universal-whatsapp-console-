@@ -16,6 +16,11 @@ urlpatterns = [
         invitations.InvitationRevokeView.as_view(),
         name="organization-invitation-revoke",
     ),
+    path(
+        "current/permissions/",
+        roles.PermissionCatalogueView.as_view(),
+        name="organization-permissions",
+    ),
     path("current/roles/", roles.RoleListCreateView.as_view(), name="organization-roles"),
     path(
         "current/roles/<uuid:pk>/", roles.RoleDetailView.as_view(), name="organization-role-detail"
