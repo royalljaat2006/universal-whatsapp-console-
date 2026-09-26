@@ -38,6 +38,27 @@ services:
       retries: 20
     restart: unless-stopped
 
+  # Periodic pg_dump -> gzip into a private volume, with retention pruning.
+  # See docs/deployment.md#backups for the restore procedure (verified with
+  # a real restore test, not assumed).
+  backup:
+    image: postgres:17-alpine
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGHOST: postgres
+      POSTGRES_USER: ${POSTGRES_USER:-whatsapp_platform}
+      POSTGRES_DB: ${POSTGRES_DB:-whatsapp_platform}
+      PGPASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-7}
+      BACKUP_INTERVAL_SECONDS: ${BACKUP_INTERVAL_SECONDS:-86400}
+    volumes:
+      - postgres-backups:/backups
+      - ./infrastructure/docker/backup/entrypoint.sh:/entrypoint.sh:ro
+    entrypoint: ["sh", "/entrypoint.sh"]
+    restart: unless-stopped
+
   redis:
     image: redis:7.4-alpine
     # AOF persistence: the Celery broker lives here; a restart must not drop
@@ -73,6 +94,12 @@ services:
     depends_on:
       backend:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A config inspect ping -d celery@$$HOSTNAME --timeout 5 | grep -q OK"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
 
   beat:
     <<: *backend
@@ -80,6 +107,15 @@ services:
     depends_on:
       backend:
         condition: service_healthy
+    healthcheck:
+      # beat doesn't answer control pings (it's a scheduler, not a worker);
+      # a live process is the liveness signal docker can act on. Scans /proc
+      # directly (no ps/pgrep — not installed in this slim image).
+      test: ["CMD-SHELL", "for p in /proc/[0-9]*; do tr '\\0' ' ' < \"$$p/cmdline\" 2>/dev/null | grep -q 'celery.*beat' && exit 0; done; exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
 
   frontend:
     build:
@@ -121,6 +157,7 @@ services:
 
 volumes:
   postgres-data:
+  postgres-backups:
   redis-data:
   frontend-node-modules:
   frontend-next-cache:

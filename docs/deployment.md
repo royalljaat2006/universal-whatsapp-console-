@@ -50,6 +50,67 @@ PostgreSQL (managed, PITR backups)   Redis (AOF on; noeviction)
 - Readiness: `GET /health/ready` (DB, pending migrations, Redis).
 - `GET /health/dependencies` (staff): adds Celery worker ping and Meta
   configuration presence.
+- Container-level (`docker-compose.yml`): `worker` healthchecks via
+  `celery inspect ping` against its own instance; `beat` (which doesn't
+  answer control pings — it's a scheduler, not a worker) via a `/proc` scan
+  for its own process, since this image has neither `ps` nor `pgrep`
+  installed. Both feed Docker's own restart/orchestration decisions,
+  independent of the HTTP-level checks above.
+
+## Backups
+
+**If PostgreSQL is managed** (the production topology above assumes this —
+"PostgreSQL (managed, PITR backups)"), use the provider's own point-in-time
+recovery instead of the mechanism below; don't run both against the same
+database.
+
+**Self-hosted PostgreSQL** (docker-compose, including local development):
+the `backup` service (`docker-compose.yml`) runs `pg_dump` on a schedule
+(`BACKUP_INTERVAL_SECONDS`, default 86400 = daily) into the `postgres-backups`
+volume, gzip-compressed and timestamped
+(`<db>-<UTC timestamp>.sql.gz`), pruning anything older than
+`BACKUP_RETENTION_DAYS` (default 7) after every run. It runs once immediately
+on startup, then on the configured interval — so restarting the stack always
+produces a fresh backup, not just a wait for the next scheduled tick. Logs
+each attempt (success with file size, or failure without touching prior
+backups) to its own container's stdout (`docker compose logs backup`).
+
+### Restore procedure
+
+1. Identify the dump to restore: `docker compose exec backup ls -la /backups`.
+2. **Never restore directly into the live database first.** Create a scratch
+   database on the same instance and restore into that:
+   ```
+   docker compose exec -e PGPASSWORD=<POSTGRES_PASSWORD> postgres \
+     psql -U <POSTGRES_USER> -d postgres -c "CREATE DATABASE restore_check;"
+   docker compose exec -e PGPASSWORD=<POSTGRES_PASSWORD> backup sh -c \
+     "gunzip -c /backups/<file>.sql.gz | psql -h postgres -U <POSTGRES_USER> -d restore_check -q"
+   ```
+3. Verify integrity before trusting it — compare row counts (and ideally a
+   content checksum) against the live database for a few core tables:
+   ```
+   psql -U <POSTGRES_USER> -d <db> -t -c \
+     "SELECT 'identity_user', count(*) FROM identity_user;"
+   ```
+   repeated against `restore_check`; counts (and a
+   `md5(string_agg(...))`-style checksum of a real column) must match.
+4. Drop the scratch database once satisfied:
+   `DROP DATABASE restore_check;`.
+5. Only once step 3 has passed for the specific backup you intend to use,
+   restore into a real target: stop application traffic (readiness check
+   returning 503 is fine — do not stop before then), then
+   `gunzip -c <file>.sql.gz | psql -h <host> -U <user> -d <target-db>`,
+   confirm with `manage.py check` and `/health/ready`, then resume traffic.
+
+**Verified 2026-09-26** (local development stack, not production): ran the
+full cycle above — a real `pg_dump` produced by the `backup` service,
+restored into a scratch database, row counts for `identity_user`,
+`organizations_organization`, `contacts_contact` and `audit_auditlog` matched
+exactly, and an md5 checksum of every user's email (sorted) was
+byte-identical between the live and restored databases. This proves the
+mechanism works; it is not a substitute for periodically re-running the same
+restore test against production's actual backup source (managed PITR or
+this same `pg_dump` mechanism, whichever is in use there).
 
 ## Deploying under a path prefix (shared gateway)
 
@@ -85,6 +146,8 @@ slash) wherever the stack is built and run:
   public host.
 - Publish only nginx. Postgres and Redis stay on private networks (compose
   binds them to 127.0.0.1 in development).
-- Database backups verified by a restore test.
+- Database backups verified by a restore test (see Backups above — done
+  against the local dev stack 2026-09-26; re-verify against whatever backup
+  source production actually uses before go-live).
 - Error alerting on `webhook processing failed`, DEAD webhook events and
   failed sends (see `infrastructure/monitoring/README.md`).
