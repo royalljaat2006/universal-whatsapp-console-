@@ -59,6 +59,9 @@ api_v1: list[URLPattern | URLResolver] = [
         contacts_api.ContactNoteDetailView.as_view(),
         name="contact-note-detail",
     ),
+    path(
+        "contacts/<uuid:pk>/erase/", contacts_api.ContactEraseView.as_view(), name="contact-erase"
+    ),
     path("contacts/<uuid:pk>/tags/", contacts_api.ContactTagView.as_view(), name="contact-tags"),
     path(
         "contacts/<uuid:pk>/tags/<uuid:tag_id>/",

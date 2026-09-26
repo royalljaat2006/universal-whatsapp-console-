@@ -153,7 +153,10 @@ export function ContactsView() {
                     >
                       <InitialsAvatar name={name(c)} seed={c.id} size="sm" />
                       <span className="min-w-0">
-                        <span className="block max-w-56 truncate font-medium">{name(c)}</span>
+                        <span className="flex items-center gap-1.5">
+                          <span className="block max-w-56 truncate font-medium">{name(c)}</span>
+                          {c.erased_at ? <StatusBadge tone="neutral">erased</StatusBadge> : null}
+                        </span>
                         {c.profile_name && c.display_name && c.profile_name !== c.display_name ? (
                           <span className="text-caption block truncate">WhatsApp: {c.profile_name}</span>
                         ) : null}
@@ -217,13 +220,39 @@ function ContactDrawer({ id, canEditNotes }: { id: string; canEditNotes: boolean
   const contact = useApiQuery(() => contactService.get(id), [id]);
   const history = useApiQuery(() => contactService.history(id), [id]);
   const c = contact.data?.id === id ? contact.data : undefined;
+  const [erasing, setErasing] = useState(false);
+  const [eraseError, setEraseError] = useState<ApiError | null>(null);
+
+  async function erase() {
+    if (
+      !window.confirm(
+        "Erase this contact's personal data? This cannot be undone: their name, phone number, attributes, notes and message text are permanently cleared.",
+      )
+    ) {
+      return;
+    }
+    setErasing(true);
+    setEraseError(null);
+    try {
+      await contactService.erase(id);
+      contact.reload();
+    } catch (cause) {
+      setEraseError(toApiError(cause));
+    } finally {
+      setErasing(false);
+    }
+  }
+
   return (
     <>
       <SheetHeader className="border-b">
         <div className="flex items-center gap-3">
           {c ? <InitialsAvatar name={name(c)} seed={c.id} size="lg" /> : null}
           <div className="min-w-0">
-            <SheetTitle className="truncate">{c ? name(c) : "Contact"}</SheetTitle>
+            <SheetTitle className="flex items-center gap-2 truncate">
+              {c ? name(c) : "Contact"}
+              {c?.erased_at ? <StatusBadge tone="neutral">data erased</StatusBadge> : null}
+            </SheetTitle>
             <SheetDescription className="tabular-nums">{c?.phone_number || " "}</SheetDescription>
           </div>
         </div>
@@ -293,6 +322,29 @@ function ContactDrawer({ id, canEditNotes }: { id: string; canEditNotes: boolean
           <section>
             <h3 className="text-section-title mb-2">Notes</h3>
             <Notes contactId={c.id} canEdit={canEditNotes} />
+          </section>
+        ) : null}
+        {c && canEditNotes ? (
+          <section className="border-destructive/25 bg-danger-soft rounded-md border p-3">
+            <h3 className="text-section-title mb-1">Erase personal data</h3>
+            {c.erased_at ? (
+              <p className="text-supporting">
+                Erased on {new Date(c.erased_at).toLocaleString()}. Their name, phone number,
+                attributes, notes and message text have been permanently cleared.
+              </p>
+            ) : (
+              <>
+                <p className="text-supporting mb-2">
+                  Permanently clears this contact&rsquo;s name, phone number, attributes, notes and
+                  message text (a GDPR-style erasure request). The record itself is kept for
+                  billing/audit history. This cannot be undone.
+                </p>
+                {eraseError ? <ErrorState error={eraseError} inline className="mb-2" /> : null}
+                <LoadingButton variant="destructive" size="sm" loading={erasing} onClick={() => void erase()}>
+                  Erase personal data
+                </LoadingButton>
+              </>
+            )}
           </section>
         ) : null}
       </div>

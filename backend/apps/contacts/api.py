@@ -71,6 +71,7 @@ class ContactSerializer(serializers.ModelSerializer):
             "first_seen_at",
             "last_message_at",
             "last_inbound_at",
+            "erased_at",
             "updated_at",
         ]
         read_only_fields = fields
@@ -189,6 +190,26 @@ class ContactTagView(_ContactObjectMixin, APIView):
 
     def delete(self, request: Request, pk: str, tag_id: str) -> Response:
         contact = svc.tag_contact(self.contact(pk), tag_id, add=False)
+        return Response(ContactSerializer(self.contact(contact.pk)).data)
+
+
+class EraseContactSerializer(serializers.Serializer):
+    confirm = serializers.BooleanField()
+
+
+class ContactEraseView(_ContactObjectMixin, APIView):
+    """POST {"confirm": true} — GDPR-style erasure. Irreversible; the row
+    survives (messages/billing records reference it) but every personal-data
+    field is cleared. See apps.contacts.management_services.erase_contact."""
+
+    required_permissions = {"post": "contacts.manage"}
+
+    def post(self, request: Request, pk: str) -> Response:
+        payload = EraseContactSerializer(data=request.data)
+        payload.is_valid(raise_exception=True)
+        if not payload.validated_data["confirm"]:
+            raise DomainError('Confirm this action by sending {"confirm": true}.')
+        contact = svc.erase_contact(self.contact(pk), actor=request.user)
         return Response(ContactSerializer(self.contact(contact.pk)).data)
 
 

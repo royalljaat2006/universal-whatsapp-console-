@@ -312,6 +312,7 @@ export interface Contact {
   first_seen_at: ISODateTime;
   last_message_at: ISODateTime | null;
   last_inbound_at: ISODateTime | null;
+  erased_at: ISODateTime | null;
   updated_at: ISODateTime;
 }
 

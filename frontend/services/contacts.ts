@@ -13,6 +13,9 @@ export const contactService = {
   addTag: (id: string, tagId: string) => api.post<Contact>(`/api/v1/contacts/${id}/tags/`, { tag_id: tagId }),
   removeTag: (id: string, tagId: string) => api.delete<Contact>(`/api/v1/contacts/${id}/tags/${tagId}/`),
   history: (id: string) => api.get<InboxConversation[]>(`/api/v1/contacts/${id}/history/`),
+  /** GDPR-style erasure. Irreversible — the contact row survives, but every
+   * personal-data field is cleared and its message text/content redacted. */
+  erase: (id: string) => api.post<Contact>(`/api/v1/contacts/${id}/erase/`, { confirm: true }),
 };
 
 export const contactImportService = {

@@ -69,6 +69,11 @@ class Contact(TenantScopedModel):
     last_message_at = models.DateTimeField(null=True, blank=True)
     # "Last seen": the contact's most recent inbound message.
     last_inbound_at = models.DateTimeField(null=True, blank=True)
+    # GDPR-style erasure (apps.contacts.management_services.erase_contact):
+    # the row survives (Message.contact is PROTECT — messages/billing records
+    # reference it) but every personal-data field is cleared. Never unset
+    # once erasure has happened.
+    erased_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         indexes = [

@@ -114,6 +114,76 @@ class TestContacts:
             == 404
         )
 
+
+class TestContactErasure:
+    def test_erasure_clears_personal_data_and_redacts_messages(self, world: dict[str, Any]) -> None:
+        contact = world["kiosk_conv"].contact
+        client = world["kiosk_agent"]
+        client.patch(
+            f"/api/v1/contacts/{contact.pk}/",
+            {"display_name": "Sheena N.", "attributes": {"customer_id": "C-9"}},
+            format="json",
+        )
+        client.post(
+            f"/api/v1/contacts/{contact.pk}/notes/", {"body": "VIP customer"}, format="json"
+        )
+        message = Message.objects.get(contact=contact)
+        assert message.text == "Where is my refund?"
+
+        response = client.post(
+            f"/api/v1/contacts/{contact.pk}/erase/", {"confirm": True}, format="json"
+        )
+        assert response.status_code == 200, response.content
+        body = response.json()
+        assert body["display_name"] == "" and body["phone_number"] == ""
+        assert body["attributes"] == {} and body["tags"] == [] and body["identities"] == []
+        assert body["erased_at"] is not None
+
+        contact.refresh_from_db()
+        assert contact.notes == "" and contact.note_entries.count() == 0
+        message.refresh_from_db()
+        assert message.text == "" and message.content == {}
+        # The row survives — Message.contact is PROTECT, and the conversation
+        # history endpoint must not start 404ing for an erased contact.
+        assert client.get(f"/api/v1/contacts/{contact.pk}/history/").status_code == 200
+
+    def test_erasure_requires_explicit_confirmation(self, world: dict[str, Any]) -> None:
+        contact = world["kiosk_conv"].contact
+        client = world["kiosk_agent"]
+        assert (
+            client.post(f"/api/v1/contacts/{contact.pk}/erase/", {}, format="json").status_code
+            == 400
+        )
+        assert (
+            client.post(
+                f"/api/v1/contacts/{contact.pk}/erase/", {"confirm": False}, format="json"
+            ).status_code
+            == 400
+        )
+        contact.refresh_from_db()
+        assert contact.erased_at is None
+
+    def test_erasure_is_irreversible_and_not_repeatable(self, world: dict[str, Any]) -> None:
+        contact = world["kiosk_conv"].contact
+        client = world["kiosk_agent"]
+        first = client.post(
+            f"/api/v1/contacts/{contact.pk}/erase/", {"confirm": True}, format="json"
+        )
+        assert first.status_code == 200
+        second = client.post(
+            f"/api/v1/contacts/{contact.pk}/erase/", {"confirm": True}, format="json"
+        )
+        assert second.status_code == 409
+
+    def test_cross_business_erasure_is_404(self, world: dict[str, Any]) -> None:
+        eps_contact = world["eps_conv"].contact
+        response = world["kiosk_agent"].post(
+            f"/api/v1/contacts/{eps_contact.pk}/erase/", {"confirm": True}, format="json"
+        )
+        assert response.status_code == 404
+        eps_contact.refresh_from_db()
+        assert eps_contact.erased_at is None
+
     def test_viewer_cannot_edit(self, world: dict[str, Any], organization: Any) -> None:
         viewer = api_client_for(factories.make_member(organization, "viewer"), organization)
         contact = world["kiosk_conv"].contact

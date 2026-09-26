@@ -9,6 +9,7 @@ from typing import Any
 
 from django.db import IntegrityError, transaction
 from django.db.models.functions import Lower
+from django.utils import timezone
 
 from apps.audit.services import record as audit
 from apps.businesses.models import Business
@@ -176,3 +177,41 @@ def delete_note(note: ContactNote, *, actor: Any) -> None:
     audit("contact.note_deleted", organization=contact.organization, actor=actor, resource=note)
     note.delete()
     events.contact_updated(contact)
+
+
+@transaction.atomic
+def erase_contact(contact: Contact, *, actor: Any) -> Contact:
+    """GDPR-style erasure. The row survives — Message.contact is PROTECT, so
+    billing/analytics records that reference this contact stay intact — but
+    every personal-data field is cleared, its notes deleted, its identities
+    (phone/BSUID) removed, and its message text/content blanked. Irreversible;
+    refuses a contact already erased."""
+    if contact.erased_at is not None:
+        raise ConflictError("This contact's personal data has already been erased.")
+
+    from apps.messaging.models import Message
+
+    redacted = Message.objects.filter(contact=contact).update(text="", content={})
+    contact.note_entries.all().delete()
+    contact.identities.all().delete()
+    contact.tags.clear()
+
+    contact.display_name = ""
+    contact.profile_name = ""
+    contact.phone_number = ""
+    contact.country_code = ""
+    contact.attributes = {}
+    contact.notes = ""
+    contact.metadata = {}
+    contact.erased_at = timezone.now()
+    contact.save()
+
+    audit(
+        "contact.erased",
+        organization=contact.organization,
+        actor=actor,
+        resource=contact,
+        metadata={"messages_redacted": redacted},
+    )
+    events.contact_updated(contact)
+    return contact
