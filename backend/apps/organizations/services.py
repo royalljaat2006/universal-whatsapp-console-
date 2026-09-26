@@ -338,3 +338,27 @@ def unique_organization_slug(name: str) -> str:
     while Organization.objects.filter(slug=slug).exists():
         slug = f"{base}-{secrets.token_hex(3)}"
     return slug
+
+
+def sole_owner_organizations(user: Any) -> list[Organization]:
+    """Organizations where deleting ``user`` would leave zero active owners —
+    account deletion blocks on these rather than silently orphaning a
+    tenant's ownership. The caller must transfer ownership or delete the
+    organization first."""
+    owner_memberships = Membership.objects.filter(
+        user=user, status=Membership.Status.ACTIVE, role__key=OWNER_ROLE_KEY
+    ).select_related("organization")
+    blocking = []
+    for membership in owner_memberships:
+        other_owners_exist = (
+            Membership.objects.filter(
+                organization=membership.organization,
+                status=Membership.Status.ACTIVE,
+                role__key=OWNER_ROLE_KEY,
+            )
+            .exclude(user=user)
+            .exists()
+        )
+        if not other_owners_exist:
+            blocking.append(membership.organization)
+    return blocking

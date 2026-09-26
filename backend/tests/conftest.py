@@ -6,6 +6,7 @@ from typing import Any
 
 import pytest
 from django.conf import settings
+from django.core.cache import cache
 from rest_framework.test import APIClient
 
 from providers.whatsapp import registry
@@ -13,6 +14,17 @@ from tests import factories
 from tests.fakes import FakeGraph
 
 FIXTURES = Path(__file__).parent / "fixtures" / "meta"
+
+
+@pytest.fixture(autouse=True)
+def clear_cache() -> None:
+    """DRF throttles (ScopedRateThrottle etc.) store their counters in the
+    default cache, which — unlike the database — is not reset between tests
+    by pytest-django. Without this, enough auth-scoped requests in one test
+    file starve the "auth" scope's budget for every test that runs after it
+    in the same process (surfaced when test_account_security.py was added:
+    unrelated login/register tests elsewhere started getting a real 429)."""
+    cache.clear()
 
 
 @pytest.fixture(autouse=True)

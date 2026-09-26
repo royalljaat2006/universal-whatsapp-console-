@@ -38,6 +38,9 @@ class User(AbstractBaseUser, PermissionsMixin):
     email = models.EmailField(max_length=254, unique=True)
     full_name = models.CharField(max_length=200, blank=True)
     is_active = models.BooleanField(default=True)
+    # Advisory only — never blocks login (see apps.identity.api). The frontend
+    # may show a reminder banner; nothing server-side is gated on this today.
+    is_email_verified = models.BooleanField(default=False)
     # Django admin access for platform operators only — unrelated to tenant RBAC.
     is_staff = models.BooleanField(default=False)
     date_joined = models.DateTimeField(auto_now_add=True)

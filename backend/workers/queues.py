@@ -38,6 +38,7 @@ TASK_ROUTES = {
     "apps.reports.tasks.*": {"queue": "analytics"},
     "apps.billing.tasks.*": {"queue": "analytics"},
     "apps.notifications.tasks.*": {"queue": "default"},
+    "apps.identity.tasks.*": {"queue": "default"},
 }
 
 BEAT_SCHEDULE = {

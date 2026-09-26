@@ -17,5 +17,7 @@ urlpatterns = [
         name="organization-invitation-revoke",
     ),
     path("current/roles/", roles.RoleListCreateView.as_view(), name="organization-roles"),
-    path("current/roles/<uuid:pk>/", roles.RoleDetailView.as_view(), name="organization-role-detail"),
+    path(
+        "current/roles/<uuid:pk>/", roles.RoleDetailView.as_view(), name="organization-role-detail"
+    ),
 ]

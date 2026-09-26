@@ -293,6 +293,29 @@ RETENTION_WEBHOOK_EVENTS_DAYS = env.int("RETENTION_WEBHOOK_EVENTS_DAYS", default
 RETENTION_AUDIT_LOGS_DAYS = env.int("RETENTION_AUDIT_LOGS_DAYS", default=0)
 
 # ---------------------------------------------------------------------------
+# Transactional email (password reset, email verification, invitations).
+# EMAIL_BACKEND defaults to the console backend: emails are logged, not sent
+# — no provider decision has been made yet (see
+# docs/productization/customer-onboarding.md). Point EMAIL_BACKEND at
+# django.core.mail.backends.smtp.EmailBackend + the EMAIL_HOST_* vars once a
+# provider is chosen; no application code changes needed.
+# ---------------------------------------------------------------------------
+EMAIL_BACKEND = env.str("EMAIL_BACKEND", default="django.core.mail.backends.console.EmailBackend")
+EMAIL_HOST = env.str("EMAIL_HOST", default="")
+EMAIL_PORT = env.int("EMAIL_PORT", default=587)
+EMAIL_HOST_USER = env.str("EMAIL_HOST_USER", default="")
+EMAIL_HOST_PASSWORD = env.str("EMAIL_HOST_PASSWORD", default="")
+EMAIL_USE_TLS = env.bool("EMAIL_USE_TLS", default=True)
+DEFAULT_FROM_EMAIL = env.str("DEFAULT_FROM_EMAIL", default="no-reply@example.com")
+
+# Absolute origin (scheme + host + any subpath mount point, no trailing
+# slash) used only where a link must work outside the app shell — email
+# bodies. Everything else (API responses) returns paths and lets the
+# frontend combine them with its own origin/BASE_PATH (see
+# lib/api/client.ts) since the browser already knows both.
+PUBLIC_BASE_URL = env.str("PUBLIC_BASE_URL", default="http://localhost:8080").rstrip("/")
+
+# ---------------------------------------------------------------------------
 # Logging — structured, context-enriched, secret-redacting.
 # ---------------------------------------------------------------------------
 LOG_LEVEL = env.str("LOG_LEVEL", default="INFO")

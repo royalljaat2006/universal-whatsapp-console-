@@ -1,15 +1,23 @@
 "use client";
 
 import { KeyRoundIcon, ScrollTextIcon } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { useState } from "react";
 
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { DetailList, Panel, SearchInput } from "@/components/ui/page";
+import { LoadingButton } from "@/components/ui/spinner";
 import { EmptyState, ErrorState, TableSkeleton } from "@/components/ui/states";
 import { StatusBadge, toneFor } from "@/components/ui/status-badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { useToast } from "@/components/ui/toast";
 import { useApiQuery } from "@/hooks/use-api-query";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { api } from "@/lib/api/client";
+import { ApiError } from "@/lib/api/errors";
+import { authService } from "@/services/auth";
 import { useSession } from "@/stores/session-context";
 import type { CursorPage } from "@/types/api";
 
@@ -40,6 +48,111 @@ export function Workspace() {
             </li>
           ))}
         </ul>
+      </Panel>
+    </div>
+  );
+}
+
+export function AccountSettings() {
+  const { user } = useSession();
+  const router = useRouter();
+  const toast = useToast();
+  const [resending, setResending] = useState(false);
+  const [verified, setVerified] = useState(user?.is_email_verified ?? false);
+  const [password, setPassword] = useState("");
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<ApiError | null>(null);
+
+  async function resend() {
+    setResending(true);
+    try {
+      await authService.resendEmailVerification();
+      toast.success("Verification email sent");
+    } catch (cause) {
+      toast.error("Couldn't send it", cause instanceof ApiError ? cause.message : String(cause));
+    } finally {
+      setResending(false);
+    }
+  }
+
+  async function deleteAccount(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (
+      !window.confirm(
+        "Delete your account? This cannot be undone. You'll be signed out immediately.",
+      )
+    ) {
+      return;
+    }
+    setDeleting(true);
+    setDeleteError(null);
+    try {
+      await authService.deleteAccount(password);
+      router.replace("/login");
+    } catch (cause) {
+      setDeleteError(cause instanceof ApiError ? cause : new ApiError(0, "CLIENT_ERROR", String(cause)));
+    } finally {
+      setDeleting(false);
+    }
+  }
+
+  if (!user) return null;
+
+  return (
+    <div className="flex flex-col gap-4">
+      <Panel title="Your account" bodyClassName="p-4">
+        <DetailList
+          items={[
+            { label: "Name", value: user.full_name || "—" },
+            { label: "Email", value: user.email },
+            {
+              label: "Email status",
+              value: verified ? (
+                <StatusBadge tone="success">verified</StatusBadge>
+              ) : (
+                <span className="flex items-center gap-2">
+                  <StatusBadge tone="warning">unverified</StatusBadge>
+                  <Button
+                    size="xs"
+                    variant="outline"
+                    disabled={resending}
+                    onClick={() =>
+                      void resend().then(() => {
+                        // The link itself flips this — this just confirms the send.
+                        setVerified(user.is_email_verified);
+                      })
+                    }
+                  >
+                    {resending ? "Sending…" : "Resend verification"}
+                  </Button>
+                </span>
+              ),
+            },
+          ]}
+        />
+      </Panel>
+      <Panel
+        title="Delete account"
+        description="Permanent. You must transfer or delete ownership of any organization you're the sole owner of first."
+        bodyClassName="p-4"
+      >
+        <form onSubmit={(e) => void deleteAccount(e)} className="flex max-w-sm flex-col gap-3">
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="delete-password">Confirm your password</Label>
+            <Input
+              id="delete-password"
+              type="password"
+              autoComplete="current-password"
+              required
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+            />
+          </div>
+          {deleteError ? <ErrorState error={deleteError} inline /> : null}
+          <LoadingButton type="submit" variant="destructive" loading={deleting} className="w-fit">
+            Delete my account
+          </LoadingButton>
+        </form>
       </Panel>
     </div>
   );

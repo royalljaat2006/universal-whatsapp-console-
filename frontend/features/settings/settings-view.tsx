@@ -7,6 +7,7 @@ import {
   ScrollTextIcon,
   SmartphoneIcon,
   TagIcon,
+  UserIcon,
   UsersIcon,
 } from "lucide-react";
 import { useState } from "react";
@@ -24,7 +25,7 @@ import { tagService } from "@/services/contacts";
 import { cn } from "@/lib/utils";
 import { useSession } from "@/stores/session-context";
 
-import { AuditLog, WhatsAppSettings, Workspace } from "./settings-sections";
+import { AccountSettings, AuditLog, WhatsAppSettings, Workspace } from "./settings-sections";
 
 function useAction(onDone: () => void) {
   const [error, setError] = useState<ApiError | null>(null);
@@ -46,12 +47,15 @@ function useAction(onDone: () => void) {
   return { run, error, busy };
 }
 
-type SectionId = "workspace" | "access" | "whatsapp" | "teams" | "tags" | "audit";
+type SectionId = "workspace" | "account" | "access" | "whatsapp" | "teams" | "tags" | "audit";
 
 export function SettingsView() {
   const { business, hasPermission } = useSession();
   const sections: { id: SectionId; label: string; icon: LucideIcon; allowed: boolean }[] = [
     { id: "workspace", label: "Workspace", icon: Building2Icon, allowed: hasPermission("organization.view") },
+    // Always available — this is about the signed-in person, not an
+    // organization permission.
+    { id: "account", label: "Your account", icon: UserIcon, allowed: true },
     { id: "access", label: "Business access", icon: KeyRoundIcon, allowed: hasPermission("members.manage") },
     {
       id: "whatsapp",
@@ -65,7 +69,6 @@ export function SettingsView() {
   ];
   const available = sections.filter((section) => section.allowed);
   const [current, setCurrent] = useState<SectionId>(available[0]?.id ?? "workspace");
-  if (!business) return null;
   const active = available.find((section) => section.id === current) ?? available[0];
 
   return (
@@ -97,11 +100,22 @@ export function SettingsView() {
         </nav>
         <div className="min-w-0">
           {active?.id === "workspace" ? <Workspace /> : null}
-          {active?.id === "access" ? <BusinessAccess businessId={business.id} /> : null}
+          {active?.id === "account" ? <AccountSettings /> : null}
+          {active?.id === "access" ? (
+            business ? (
+              <BusinessAccess businessId={business.id} />
+            ) : (
+              <p className="text-supporting">Create a business to manage its access.</p>
+            )
+          ) : null}
           {active?.id === "whatsapp" ? <WhatsAppSettings /> : null}
           {active?.id === "teams" ? <Teams canManage={hasPermission("teams.manage")} /> : null}
           {active?.id === "tags" ? (
-            <TagManager businessId={business.id} canManage={hasPermission("contacts.manage")} />
+            business ? (
+              <TagManager businessId={business.id} canManage={hasPermission("contacts.manage")} />
+            ) : (
+              <p className="text-supporting">Create a business to manage its tags.</p>
+            )
           ) : null}
           {active?.id === "audit" ? <AuditLog /> : null}
         </div>

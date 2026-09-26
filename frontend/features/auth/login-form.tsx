@@ -1,6 +1,7 @@
 "use client";
 
 import { EyeIcon, EyeOffIcon, LockIcon, MailIcon } from "lucide-react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
@@ -59,7 +60,12 @@ export function LoginForm() {
         </div>
       </div>
       <div className="flex flex-col gap-1.5">
-        <Label htmlFor="password">Password</Label>
+        <div className="flex items-center justify-between">
+          <Label htmlFor="password">Password</Label>
+          <Link href="/forgot-password" className="text-caption text-primary hover:underline">
+            Forgot password?
+          </Link>
+        </div>
         <div className="relative">
           <LockIcon
             aria-hidden
