@@ -9,24 +9,34 @@ import logging
 
 from celery import shared_task
 from django.conf import settings
-from django.core.mail import send_mail
+from django.core.mail import EmailMultiAlternatives
+from django.template.loader import render_to_string
 
 logger = logging.getLogger(__name__)
+
+
+def _send(*, subject: str, template: str, context: dict, to: str) -> None:
+    """Plain-text body (base Message) + an HTML alternative, from one pair of
+    templates (emails/<template>.txt / .html) — so clients that don't render
+    HTML still get a usable email, and (a lesser but real benefit) a
+    text-only part reduces the chance of the message being flagged as spam."""
+    text_body = render_to_string(f"emails/{template}.txt", context)
+    html_body = render_to_string(f"emails/{template}.html", context)
+    message = EmailMultiAlternatives(
+        subject=subject, body=text_body, from_email=settings.DEFAULT_FROM_EMAIL, to=[to]
+    )
+    message.attach_alternative(html_body, "text/html")
+    message.send()
 
 
 @shared_task(bind=True, max_retries=3, default_retry_delay=30)
 def send_verification_email(self, *, email: str, verify_url: str) -> None:
     try:
-        send_mail(
+        _send(
             subject="Verify your email",
-            message=(
-                f"Confirm this is your email address to finish setting up your account.\n\n"
-                f"{verify_url}\n\n"
-                f"This link doesn't expire, but stops working once verified. If you didn't "
-                f"create this account, you can ignore this email."
-            ),
-            from_email=settings.DEFAULT_FROM_EMAIL,
-            recipient_list=[email],
+            template="verify_email",
+            context={"verify_url": verify_url},
+            to=email,
         )
     except Exception as exc:
         logger.warning("verification email send failed, retrying: %s", exc)
@@ -36,16 +46,11 @@ def send_verification_email(self, *, email: str, verify_url: str) -> None:
 @shared_task(bind=True, max_retries=3, default_retry_delay=30)
 def send_password_reset_email(self, *, email: str, reset_url: str) -> None:
     try:
-        send_mail(
+        _send(
             subject="Reset your password",
-            message=(
-                f"Use this link to choose a new password:\n\n"
-                f"{reset_url}\n\n"
-                f"This link expires soon and works once. If you didn't request this, "
-                f"you can ignore this email — your password hasn't changed."
-            ),
-            from_email=settings.DEFAULT_FROM_EMAIL,
-            recipient_list=[email],
+            template="password_reset",
+            context={"reset_url": reset_url},
+            to=email,
         )
     except Exception as exc:
         logger.warning("password reset email send failed, retrying: %s", exc)

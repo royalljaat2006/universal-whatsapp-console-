@@ -39,6 +39,9 @@ class TestPasswordReset:
         assert len(mail.outbox) == 1
         assert mail.outbox[0].to == [owner.email]
         assert "reset-password" in mail.outbox[0].body
+        # Proper templates, not a bare send_mail() string: text + HTML parts.
+        assert mail.outbox[0].alternatives[0][1] == "text/html"
+        assert "reset-password" in mail.outbox[0].alternatives[0][0]
 
     def test_request_is_204_even_for_an_unknown_email_and_sends_nothing(self) -> None:
         mail.outbox.clear()

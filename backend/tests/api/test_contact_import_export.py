@@ -59,7 +59,9 @@ class TestImport:
         assert created.display_name == "Brand New"
         assert {t.name for t in created.tags.all()} == {"imported", "vip"}
 
-    def test_missing_phone_column_fails_the_whole_job(self, owner_api: Any, organization: Any) -> None:
+    def test_missing_phone_column_fails_the_whole_job(
+        self, owner_api: Any, organization: Any
+    ) -> None:
         business = factories.make_business(organization, "Kiosk")
         response = _upload(owner_api, business, "name,city\nAda,Delhi\n")
         assert response.status_code == 202

@@ -1,0 +1,13 @@
+{% extends "emails/base_email.html" %}
+{% block title %}Verify your email{% endblock %}
+{% block heading %}Verify your email{% endblock %}
+{% block body %}
+<p style="margin:0 0 16px;">Confirm this is your email address to finish setting up your account.</p>
+{% endblock %}
+{% block cta %}
+<p style="margin:0 0 16px;">
+  <a href="{{ verify_url }}" style="display:inline-block;background-color:#0f172a;color:#ffffff;text-decoration:none;padding:10px 22px;border-radius:6px;font-size:14px;font-weight:500;">Verify email</a>
+</p>
+<p style="margin:0;font-size:12px;color:#6b7280;word-break:break-all;">Or paste this link into your browser: {{ verify_url }}</p>
+{% endblock %}
+{% block footer %}This link doesn't expire, but stops working once verified. If you didn't create this account, you can ignore this email.{% endblock %}

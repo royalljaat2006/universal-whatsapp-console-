@@ -1,0 +1,13 @@
+{% extends "emails/base_email.html" %}
+{% block title %}You've been invited to {{ organization_name }}{% endblock %}
+{% block heading %}Join {{ organization_name }} on WhatsApp Console{% endblock %}
+{% block body %}
+<p style="margin:0 0 16px;">{{ inviter_name }} invited you to join <strong>{{ organization_name }}</strong> as {{ role_name }}.</p>
+{% endblock %}
+{% block cta %}
+<p style="margin:0 0 16px;">
+  <a href="{{ accept_url }}" style="display:inline-block;background-color:#0f172a;color:#ffffff;text-decoration:none;padding:10px 22px;border-radius:6px;font-size:14px;font-weight:500;">Accept invitation</a>
+</p>
+<p style="margin:0;font-size:12px;color:#6b7280;word-break:break-all;">Or paste this link into your browser: {{ accept_url }}</p>
+{% endblock %}
+{% block footer %}This invitation expires in 7 days and works once. If you weren't expecting this, you can ignore this email.{% endblock %}

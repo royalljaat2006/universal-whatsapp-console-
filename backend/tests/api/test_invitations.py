@@ -5,6 +5,7 @@ from datetime import timedelta
 from typing import Any
 
 import pytest
+from django.core import mail
 from django.utils import timezone
 from rest_framework.test import APIClient
 
@@ -24,6 +25,7 @@ def _csrf_client() -> APIClient:
 
 class TestCreateListRevoke:
     def test_owner_can_invite_and_token_is_shown_once(self, owner: Any, organization: Any) -> None:
+        mail.outbox.clear()
         client = api_client_for(owner, organization)
         response = client.post(
             "/api/v1/organizations/current/invitations/",
@@ -40,6 +42,16 @@ class TestCreateListRevoke:
         listed = client.get("/api/v1/organizations/current/invitations/").json()
         assert listed[0]["id"] == body["id"]
         assert "token" not in listed[0]
+
+        assert len(mail.outbox) == 1
+        sent = mail.outbox[0]
+        assert sent.to == ["new-hire@example.com"]
+        assert organization.name in sent.subject
+        assert body["accept_path"] in sent.body  # plain-text part, incl. the real token
+        assert "Agent" in sent.body
+        html_part = sent.alternatives[0][0]
+        assert sent.alternatives[0][1] == "text/html"
+        assert body["accept_path"] in html_part
 
     def test_agent_cannot_invite(self, organization: Any) -> None:
         agent = factories.make_member(organization, "agent")
