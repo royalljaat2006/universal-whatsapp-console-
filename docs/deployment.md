@@ -44,6 +44,41 @@ PostgreSQL (managed, PITR backups)   Redis (AOF on; noeviction)
    `analytics-recompute-recent`. Give the `campaigns` queue its own worker in
    production so bulk sends never compete with agent replies.
 
+## Rollback
+
+Prefer rolling back **application code only** — redeploy the previous image
+tag for web/worker/beat, leave the database schema as-is. This works
+whenever the new release's migrations were additive (new nullable column,
+new table) — true for the overwhelming majority of migrations in this
+project (check `git log -p -- backend/*/migrations/` for the release being
+rolled back if unsure; a migration that drops a column or table, or backfills
+data destructively, is the one case this doesn't cover). The previous code
+version does not query columns/tables it doesn't know about, so it runs
+fine against a schema one release ahead of it.
+
+1. Redeploy the prior image tag for `backend` (web + worker + beat use the
+   same image).
+2. Confirm `/health/ready` returns 200 (not just that containers are
+   "running" — readiness fails closed on migration mismatches) and re-run
+   the release procedure's smoke test (login, one webhook handshake).
+3. Only if the rolled-back code cannot tolerate the newer schema (rare —
+   e.g. a migration that renamed or dropped something the old code still
+   reads): reverse the specific migration as its own step, same as forward
+   migration —
+   `docker run … backend python manage.py migrate <app> <previous_migration_name> --noinput`
+   — **verified as reversible for that specific migration first**
+   (`python manage.py sqlmigrate <app> <migration_name>` to read what
+   `migrate` would actually run, both directions, before trusting it against
+   real data), then redeploy code. Never do this against production without
+   a fresh backup taken immediately before (see Backups above).
+4. If a bad release already sent real WhatsApp messages, wrote billing
+   records, or processed webhooks: rolling back code does not undo those
+   side effects — assess what happened via the audit log
+   (`GET /api/v1/audit-logs/`) and `WhatsAppAccountEvent`/`MessageCost`
+   records before deciding whether further action (customer communication,
+   a manual billing correction) is needed. Rollback here means "stop the
+   bad code from running," not "undo what it already did."
+
 ## Probes
 
 - Liveness: `GET /health/live` (no dependencies).
@@ -151,3 +186,19 @@ slash) wherever the stack is built and run:
   source production actually uses before go-live).
 - Error alerting on `webhook processing failed`, DEAD webhook events and
   failed sends (see `infrastructure/monitoring/README.md`).
+- `EMAIL_BACKEND`/`EMAIL_HOST*` point at a real SMTP provider — the default
+  console backend only logs, nothing is actually delivered (see .env.example
+  for Gmail App Password setup as a temporary option).
+- `META_APP_ID`, `META_APP_SECRET` and `META_EMBEDDED_SIGNUP_CONFIG_ID` are
+  set if customers should be able to connect their own WhatsApp Business
+  Account through Embedded Signup — without these the "Connect WhatsApp"
+  button correctly reports "not configured yet" rather than failing
+  silently, but the feature doesn't work.
+- `NEXT_PUBLIC_SUPPORT_EMAIL` set if the Help & Support panel's "Contact
+  support" link should work, rather than show "not configured yet".
+- The app-shell CSP (`frontend/proxy.ts`) was verified against this exact
+  Meta SDK integration in local development (Playwright,
+  `e2e/csp.spec.ts` + `e2e/embedded-signup-csp.spec.ts`) — re-run
+  `npm run test:e2e` against the production domain once deployed, since a
+  CSP is enforced per-origin and this is the one piece of this checklist
+  that a passing local test doesn't fully guarantee for a different host.
