@@ -1,12 +1,16 @@
 from typing import Any
 
 from django.db.models import QuerySet
+from django.utils import timezone
 from rest_framework import generics
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from apps.businesses.models import Business
+from apps.contacts.models import Contact
+from apps.messaging.models import Message
 from apps.organizations.api.scoping import OrganizationScopedMixin
 from apps.organizations.api.serializers import (
     MemberSerializer,
@@ -14,6 +18,7 @@ from apps.organizations.api.serializers import (
     OrganizationSummarySerializer,
 )
 from apps.organizations.models import Membership, Organization
+from apps.whatsapp.models import WhatsAppBusinessAccount, WhatsAppPhoneNumber
 
 
 class MyOrganizationsView(generics.ListAPIView):
@@ -51,3 +56,35 @@ class MemberListView(OrganizationScopedMixin, generics.ListAPIView):
 
     def scope_queryset(self, queryset: QuerySet[Membership]) -> QuerySet[Membership]:
         return queryset.select_related("user", "role")
+
+
+class UsageSummaryView(OrganizationScopedMixin, APIView):
+    """Real, currently-countable usage — no invented quotas or plan limits.
+    Foundation for future plan-based quota enforcement (see
+    docs/productization/usage-metering.md): every number here already exists
+    as a live count today; nothing here is metered or billed against a plan,
+    because there is no Plan/Subscription model yet (deliberately out of
+    scope — payment billing was not requested)."""
+
+    required_permissions = {"get": "billing.view"}
+
+    def get(self, request: Request, *args: Any, **kwargs: Any) -> Response:
+        organization = self.organization
+        period_start = timezone.now().replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        return Response(
+            {
+                "members": Membership.objects.filter(
+                    organization=organization, status=Membership.Status.ACTIVE
+                ).count(),
+                "businesses": Business.objects.for_organization(organization).count(),
+                "whatsapp_business_accounts": WhatsAppBusinessAccount.objects.for_organization(
+                    organization
+                ).count(),
+                "phone_numbers": WhatsAppPhoneNumber.objects.for_organization(organization).count(),
+                "contacts": Contact.objects.for_organization(organization).count(),
+                "messages_this_period": Message.objects.filter(
+                    organization=organization, occurred_at__gte=period_start
+                ).count(),
+                "period_start": period_start,
+            }
+        )

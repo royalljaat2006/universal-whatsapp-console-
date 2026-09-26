@@ -66,6 +66,7 @@ export function Workspace() {
           ]}
         />
       </Panel>
+      {hasPermission("billing.view") ? <UsageSummaryPanel /> : null}
       <Panel title="Businesses" description="Workspaces you can access in this organization.">
         {businesses.length === 0 ? (
           <p className="text-supporting px-4 pt-3">
@@ -107,6 +108,35 @@ export function Workspace() {
         {error ? <ErrorState error={error} inline className="mx-4 mb-4" /> : null}
       </Panel>
     </div>
+  );
+}
+
+/** Real, currently-countable usage — not a plan/quota check (there is no
+ * Plan/Subscription model yet; see docs/productization/usage-metering.md). */
+function UsageSummaryPanel() {
+  const usage = useApiQuery(() => organizationService.usage(), []);
+  return (
+    <Panel title="Usage" description="Current counts for this organization.">
+      {usage.error ? (
+        <ErrorState error={usage.error} onRetry={usage.reload} inline className="m-4" />
+      ) : null}
+      {!usage.data && !usage.error ? <TableSkeleton rows={2} columns={3} /> : null}
+      {usage.data ? (
+        <DetailList
+          items={[
+            { label: "Team members", value: usage.data.members },
+            { label: "Businesses", value: usage.data.businesses },
+            { label: "WhatsApp Business Accounts", value: usage.data.whatsapp_business_accounts },
+            { label: "Phone numbers", value: usage.data.phone_numbers },
+            { label: "Contacts", value: usage.data.contacts },
+            {
+              label: "Messages this period",
+              value: `${usage.data.messages_this_period} (since ${new Date(usage.data.period_start).toLocaleDateString()})`,
+            },
+          ]}
+        />
+      ) : null}
+    </Panel>
   );
 }
 

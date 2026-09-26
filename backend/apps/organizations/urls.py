@@ -6,6 +6,7 @@ urlpatterns = [
     path("", views.MyOrganizationsView.as_view(), name="organization-list"),
     path("current/", views.CurrentOrganizationView.as_view(), name="organization-current"),
     path("current/members/", views.MemberListView.as_view(), name="organization-members"),
+    path("current/usage/", views.UsageSummaryView.as_view(), name="organization-usage"),
     path(
         "current/invitations/",
         invitations.InvitationListCreateView.as_view(),

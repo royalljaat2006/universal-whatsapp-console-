@@ -44,6 +44,16 @@ export interface MyMembership {
   permissions: string[];
 }
 
+export interface UsageSummary {
+  members: number;
+  businesses: number;
+  whatsapp_business_accounts: number;
+  phone_numbers: number;
+  contacts: number;
+  messages_this_period: number;
+  period_start: ISODateTime;
+}
+
 export interface Role {
   id: UUID;
   key: string;
