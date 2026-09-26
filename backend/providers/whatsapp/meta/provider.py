@@ -93,6 +93,7 @@ class MetaWhatsAppProvider(WhatsAppProvider):
         transport: httpx.BaseTransport | None = None,
         media_hosts: list[str] | None = None,
     ):
+        self._config = config
         self._client = GraphClient(config, transport=transport)
         self._media_hosts = list(media_hosts or [])
 
@@ -305,6 +306,39 @@ class MetaWhatsAppProvider(WhatsAppProvider):
             "POST",
             f"/{account.business_account_external_id}/subscribed_apps",
             token=account.access_token,
+        )
+
+    # -- onboarding (Embedded Signup) -----------------------------------------
+    def exchange_code_for_token(self, code: str) -> str:
+        # Verified 2026-09-26 (docs/integrations/meta/api-assumptions.md):
+        # GET /{version}/oauth/access_token?client_id=&client_secret=&code=
+        # -> {"access_token": "<business token>"}. No bearer token yet — that's
+        # the point of this call — so `token` is intentionally omitted.
+        body = self._client.request(
+            "GET",
+            "/oauth/access_token",
+            params={
+                "client_id": self._config.app_id,
+                "client_secret": self._config.app_secret,
+                "code": code,
+            },
+        )
+        token = body.get("access_token")
+        if not token:
+            raise ProviderError(
+                "Meta accepted the request but returned no access token",
+                code="PROVIDER_OUTCOME_UNKNOWN",
+            )
+        return str(token)
+
+    def register_phone_number(self, sender: SenderRef, *, pin: str) -> None:
+        # Verified 2026-09-26: POST /{PHONE_NUMBER_ID}/register
+        # {"messaging_product": "whatsapp", "pin": "<6 digits>"}.
+        self._client.request(
+            "POST",
+            f"/{sender.phone_number_external_id}/register",
+            token=sender.access_token,
+            json={"messaging_product": "whatsapp", "pin": pin},
         )
 
     def health_check(self, sender: SenderRef) -> HealthStatus:

@@ -240,6 +240,11 @@ META_APP_ID = env.str("META_APP_ID", default="")
 META_APP_SECRET = env.str("META_APP_SECRET", default="")
 META_WEBHOOK_VERIFY_TOKEN = env.str("META_WEBHOOK_VERIFY_TOKEN", default="")
 META_ACCESS_TOKEN_REFERENCE = env.str("META_ACCESS_TOKEN_REFERENCE", default="")
+# Facebook Login for Business configuration id for our Embedded Signup flow
+# (App Dashboard > Facebook Login for Business > Configurations). Not secret —
+# it identifies which permission/asset configuration the JS SDK requests, the
+# same way it appears directly in Meta's own client-side example code.
+META_EMBEDDED_SIGNUP_CONFIG_ID = env.str("META_EMBEDDED_SIGNUP_CONFIG_ID", default="")
 # Hosts Meta serves media downloads from. Media URLs outside this list are
 # never fetched (SSRF guard). Verified host: lookaside.fbsbx.com.
 META_MEDIA_DOWNLOAD_HOSTS = env.list("META_MEDIA_DOWNLOAD_HOSTS", default=["lookaside.fbsbx.com"])

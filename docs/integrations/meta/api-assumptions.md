@@ -5,6 +5,13 @@
 `META_GRAPH_API_VERSION` or adding any new Meta call. Nothing in the codebase
 may depend on Meta behaviour that is not listed here.
 
+**Embedded Signup section re-verified 2026-09-26** (WebFetch against
+developers.facebook.com/documentation/business-messaging/whatsapp/
+embedded-signup/{overview,implementation}, /access-tokens/, and
+/embedded-signup/onboarding-customers-as-a-tech-provider — see that section
+below). Embedded Signup **v2 is deprecated 2026-10-15**; this integration
+targets v4 (`config_id` + `response_type: 'code'` flow), which is unaffected.
+
 ## API version
 
 | Item | Value | Source |
@@ -44,8 +51,9 @@ may depend on Meta behaviour that is not listed here.
 | Create template | `POST /{WABA_ID}/message_templates` (`name`, `language`, `category`, `components`, optional `parameter_format`) | `create_template` |
 | Edit template | `POST /{TEMPLATE_ID}` | `update_template` |
 | Delete template | `DELETE /{WABA_ID}/message_templates?name=…&hsm_id=…` | `delete_template` |
-| Subscribe app to WABA webhooks | `POST /{WABA_ID}/subscribed_apps` → `{"success": true}` | `subscribe_webhooks` |
-| Register number (one-off, manual) | `POST /{PHONE_NUMBER_ID}/register` with a 6-digit PIN | **not automated** (operator runbook) |
+| Subscribe app to WABA webhooks | `POST /{WABA_ID}/subscribed_apps` → `{"success": true}` | `subscribe_webhooks` (also used to finish an Embedded Signup connection — same call, no separate endpoint) |
+| Register number | `POST /{PHONE_NUMBER_ID}/register` `{"messaging_product":"whatsapp","pin":"<6 digits>"}` | `register_phone_number`, called once by `complete_embedded_signup` with a freshly generated PIN (not persisted — not needed again; a manual re-registration after that is still an operator runbook item) |
+| Embedded Signup code exchange | `GET /oauth/access_token?client_id=&client_secret=&code=` → `{"access_token": "<business token>"}` | `MetaWhatsAppProvider.exchange_code_for_token` — no bearer token on this call, it's what produces one |
 | Upload media (Cycle 2) | `POST /{PHONE_NUMBER_ID}/media`, multipart `messaging_product=whatsapp`, `type=<mime>`, `file` → `{"id"}` | `upload_media` |
 | Media metadata (Cycle 2) | `GET /{MEDIA_ID}?phone_number_id=<id>` → `{url, mime_type, sha256, file_size, id}` | `get_media` |
 | Media download (Cycle 2) | `GET <url>` with the same Bearer token. The URL is valid for **5 minutes**, and a 404 means it expired | `download_media` (https + host allow-list `META_MEDIA_DOWNLOAD_HOSTS`, default `lookaside.fbsbx.com`; streamed with a size cap) |
@@ -60,6 +68,45 @@ display_phone_number, verified_name, status, quality_rating,
 code_verification_status, name_status, messaging_limit_tier, throughput`.
 Graph rejects the whole call when an unknown field is requested, so only these
 are listed.
+
+<a id="embedded-signup"></a>
+## Embedded Signup (verified 2026-09-26, v4)
+
+Client-side (JS SDK), server-side exchange, then the same connection
+pipeline every WABA goes through (`apps.whatsapp.services.
+complete_embedded_signup` -> `register_business_account` ->
+`run_connection_pipeline`).
+
+1. Load `https://connect.facebook.net/en_US/sdk.js`, then
+   `FB.init({appId, version: 'v25.0', xfbml: true})`. (`appId` /
+   `META_APP_ID` is not secret; it is the same value Meta's own client-side
+   examples embed directly.)
+2. Launch: `FB.login(callback, {config_id: META_EMBEDDED_SIGNUP_CONFIG_ID,
+   response_type: 'code', override_default_response_type: true, extras:
+   {setup: {}}})`. `config_id` comes from App Dashboard > Facebook Login for
+   Business > Configurations — also not secret, but served from
+   `GET /api/v1/whatsapp/embedded-signup/config/` so it can be rotated
+   without a frontend redeploy.
+3. Listen on `window.addEventListener('message', ...)`, checking
+   `event.origin.endsWith('facebook.com')`, for a JSON payload with
+   `data.type === 'WA_EMBEDDED_SIGNUP'`. On `data.event === 'FINISH'`,
+   `data.data` carries `phone_number_id` and `waba_id`. `CANCEL` carries
+   `current_step`; treated as a user-abandoned flow, not an error.
+4. The `FB.login` callback separately receives
+   `response.authResponse.code` — a code valid for **~30 seconds**. The
+   frontend must have both the FINISH event's ids and this code before
+   calling our backend.
+5. `POST /api/v1/whatsapp/embedded-signup/complete/`
+   `{business_id, waba_id, phone_number_id, code}` (`numbers.manage`).
+   Backend: exchange the code (see table above) for a business token,
+   store it as an encrypted `ProviderCredential`
+   (`create_encrypted_credential`), `register_business_account`, best-effort
+   `register_phone_number`, then queue the standard verify/subscribe/sync
+   pipeline exactly like the manual connect flow.
+
+Not automated by this integration (unchanged from the manual flow):
+`debug_token` / `granular_scopes` inspection, and instructing the customer to
+add a payment method in WhatsApp Manager (Meta-hosted, outside our app).
 
 <a id="send-message"></a>
 ### Send request/response

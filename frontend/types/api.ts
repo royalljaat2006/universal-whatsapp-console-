@@ -85,6 +85,14 @@ export interface BusinessAccount {
   created_at: ISODateTime;
 }
 
+export interface EmbeddedSignupConfig {
+  app_id: string;
+  config_id: string;
+  graph_api_version: string;
+  /** False if META_APP_ID or META_EMBEDDED_SIGNUP_CONFIG_ID isn't set yet. */
+  configured: boolean;
+}
+
 export interface PhoneNumber {
   id: UUID;
   business_id: UUID;

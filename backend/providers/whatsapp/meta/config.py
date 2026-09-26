@@ -15,6 +15,10 @@ class MetaConfig:
     timeout_seconds: float
     app_secret: str
     webhook_verify_token: str
+    # Added for Embedded Signup; default keeps existing positional
+    # constructions (tests/unit/test_meta_provider.py etc.) working unchanged.
+    app_id: str = ""
+    embedded_signup_config_id: str = ""
 
     def __post_init__(self) -> None:
         if not _VERSION_PATTERN.match(self.graph_version):
@@ -34,6 +38,8 @@ class MetaConfig:
             graph_base_url=settings.META_GRAPH_API_BASE_URL,
             graph_version=settings.META_GRAPH_API_VERSION,
             timeout_seconds=settings.META_HTTP_TIMEOUT_SECONDS,
+            app_id=settings.META_APP_ID,
             app_secret=settings.META_APP_SECRET,
             webhook_verify_token=settings.META_WEBHOOK_VERIFY_TOKEN,
+            embedded_signup_config_id=settings.META_EMBEDDED_SIGNUP_CONFIG_ID,
         )

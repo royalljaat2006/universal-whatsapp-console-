@@ -19,6 +19,8 @@ import { whatsappService } from "@/services/whatsapp";
 import { useSession } from "@/stores/session-context";
 import type { BusinessAccount, PhoneNumber } from "@/types/api";
 
+import { EmbeddedSignupButton } from "./embedded-signup-button";
+
 function when(value: string | null): string {
   return value ? new Date(value).toLocaleString([], { dateStyle: "medium", timeStyle: "short" }) : "Never";
 }
@@ -104,6 +106,9 @@ export function NumbersView() {
             <Button variant="outline" size="sm" onClick={refresh}>
               <RefreshCwIcon aria-hidden /> Refresh
             </Button>
+            {canManage ? (
+              <EmbeddedSignupButton businessId={business.id} onConnected={refresh} variant="outline" />
+            ) : null}
             {canManage && accountList.length ? (
               <LoadingButton size="sm" loading={syncing} onClick={() => void syncAll(accountList)}>
                 Sync from Meta
@@ -120,7 +125,12 @@ export function NumbersView() {
           <EmptyState
             icon={SmartphoneIcon}
             title={`No WhatsApp Business Account connected to ${business.name}`}
-            description="Once an administrator connects this business's WhatsApp Business Account, its numbers are imported from Meta and appear here."
+            description="Connect a WhatsApp Business Account with Meta to start messaging — numbers are imported automatically once it's connected."
+            action={
+              canManage ? (
+                <EmbeddedSignupButton businessId={business.id} onConnected={refresh} />
+              ) : undefined
+            }
           />
         </Panel>
       ) : null}

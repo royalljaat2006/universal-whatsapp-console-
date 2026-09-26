@@ -38,13 +38,17 @@ class GraphClient:
         method: str,
         path: str,
         *,
-        token: str,
+        token: str | None = None,
         params: dict[str, Any] | None = None,
         json: dict[str, Any] | None = None,
         absolute_url: str | None = None,
         data: dict[str, Any] | None = None,
         files: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
+        # ``token=None`` only for the Embedded Signup code exchange (see
+        # MetaWhatsAppProvider.exchange_code_for_token), which authenticates via
+        # client_id/client_secret query params instead of a bearer token — there
+        # is no token to send yet, that's the point of the call.
         idempotent = method.upper() in {"GET", "HEAD"}
         url = absolute_url or path
         started = time.perf_counter()
@@ -57,7 +61,7 @@ class GraphClient:
                 json=json,
                 data=data,
                 files=files,
-                headers={"Authorization": f"Bearer {token}"},
+                headers={"Authorization": f"Bearer {token}"} if token else {},
             )
             status = response.status_code
         except (httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout) as exc:

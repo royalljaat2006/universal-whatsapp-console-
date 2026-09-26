@@ -13,6 +13,7 @@ Provider calls never run inside a database transaction.
 """
 
 import logging
+import secrets
 from typing import Any
 
 from django.db import transaction
@@ -31,7 +32,12 @@ from apps.whatsapp.models import (
     WhatsAppPhoneNumber,
 )
 from core import crypto
-from core.exceptions import ConfigurationRequiredError, ConflictError, NotFoundError
+from core.exceptions import (
+    ConfigurationRequiredError,
+    ConflictError,
+    EmbeddedSignupError,
+    NotFoundError,
+)
 from core.secrets import SecretReference
 from providers.whatsapp.base import WhatsAppProvider
 from providers.whatsapp.errors import ProviderError
@@ -385,3 +391,95 @@ def run_connection_pipeline(
     if subscribe and account.webhooks_subscribed_at is None:
         subscribe_webhooks(account)
     sync_phone_numbers(account, actor=actor)
+
+
+# ---------------------------------------------------------------------------
+# Embedded Signup
+# ---------------------------------------------------------------------------
+
+
+def complete_embedded_signup(
+    *,
+    organization: Organization,
+    business: Business,
+    waba_id: str,
+    phone_number_id: str,
+    code: str,
+    actor: Any = None,
+    request: Any = None,
+) -> WhatsAppBusinessAccount:
+    """Turn an Embedded Signup completion (the JS SDK's FINISH event + the
+    authorization code from FB.login) into a connected WABA.
+
+    The code is only valid for ~30 seconds, so the exchange and phone
+    registration run synchronously here rather than through a queued task —
+    the one deliberate exception to this module's "provider calls never run
+    in the request" rule for the *rest* of the connection pipeline (verify /
+    subscribe / sync numbers), which the caller still queues afterwards.
+
+    Registering the phone number establishes its two-step verification PIN.
+    We generate one and do not keep it: it is not needed for any ongoing
+    operation, and if the number already had a *different* PIN from a prior
+    registration, this step fails without blocking the rest of the
+    connection — sync can still pick up an already-registered number.
+    """
+    provider = get_provider(Provider.META)
+    try:
+        token = provider.exchange_code_for_token(code)
+    except ProviderError as exc:
+        raise EmbeddedSignupError(
+            "Meta rejected the Embedded Signup code. It may have expired — try connecting again.",
+            details={"provider_code": exc.code},
+        ) from exc
+
+    credential = create_encrypted_credential(
+        organization=organization,
+        label=f"Embedded Signup — WABA {waba_id}",
+        access_token=token,
+        created_by=actor,
+    )
+
+    account = register_business_account(
+        organization=organization,
+        business=business,
+        external_id=waba_id,
+        credential=credential,
+        actor=actor,
+        request=request,
+    )
+
+    pin = f"{secrets.randbelow(1_000_000):06d}"
+    try:
+        provider.register_phone_number(
+            SenderRef(phone_number_external_id=phone_number_id, access_token=token), pin=pin
+        )
+    except ProviderError as exc:
+        logger.warning(
+            "embedded signup: phone number registration failed (may already be registered)",
+            extra={"phone_number_external_id": phone_number_id, "error_code": exc.code},
+        )
+        reported_code = exc.provider_code or exc.code
+        account.provider_metadata = {
+            **account.provider_metadata,
+            "embedded_signup_phone_registration_error": f"{reported_code}: {exc.message}"[:300],
+        }
+        account.save(update_fields=["provider_metadata"])
+    else:
+        audit(
+            actions.PHONE_NUMBER_CONNECTED,
+            organization=organization,
+            actor=actor,
+            resource=account,
+            metadata={"phone_number_external_id": phone_number_id},
+            request=request,
+        )
+
+    audit(
+        actions.EMBEDDED_SIGNUP_COMPLETED,
+        organization=organization,
+        actor=actor,
+        resource=account,
+        metadata={"waba_id": waba_id, "phone_number_external_id": phone_number_id},
+        request=request,
+    )
+    return account

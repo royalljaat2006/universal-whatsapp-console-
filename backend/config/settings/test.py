@@ -32,10 +32,12 @@ CAMPAIGN_AUTO_TICK = False
 
 # Deterministic Meta configuration. Tests must never reach graph.facebook.com;
 # the provider's HTTP transport is replaced in tests (see tests/conftest.py).
+META_APP_ID = "test-app-id"
 META_APP_SECRET = "test-app-secret"
 META_WEBHOOK_VERIFY_TOKEN = "test-verify-token"
 META_GRAPH_API_BASE_URL = "https://graph.facebook.com"
 META_GRAPH_API_VERSION = "v26.0"
+META_EMBEDDED_SIGNUP_CONFIG_ID = "test-config-id"
 FIELD_ENCRYPTION_KEYS = ["pZ1jz3kqGJ8Vqf0cS8tT7p9k7Yx2HqQ0b3cJ6gq4b1Y="]
 
 REST_FRAMEWORK = {

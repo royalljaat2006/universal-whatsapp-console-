@@ -59,6 +59,15 @@ class ConfigurationRequiredError(DomainError):
     default_message = "This capability is not configured."
 
 
+class EmbeddedSignupError(DomainError):
+    """The Embedded Signup code exchange with Meta failed — e.g. the code
+    expired (it is valid for only ~30 seconds) or was already used."""
+
+    code = "EMBEDDED_SIGNUP_FAILED"
+    status_code = status.HTTP_502_BAD_GATEWAY
+    default_message = "Could not complete WhatsApp Embedded Signup."
+
+
 def error_body(code: str, message: str, details: dict[str, Any] | None = None) -> dict[str, Any]:
     return {
         "error": {

@@ -5,8 +5,12 @@ AUTH_LOGIN_SUCCEEDED = "auth.login_succeeded"
 AUTH_LOGIN_FAILED = "auth.login_failed"
 AUTH_LOGOUT = "auth.logout"
 AUTH_REGISTERED = "auth.registered"
-AUTH_PASSWORD_RESET_REQUESTED = "auth.password_reset_requested"  # noqa: S105 -- action name, not a secret
-AUTH_PASSWORD_RESET_COMPLETED = "auth.password_reset_completed"  # noqa: S105 -- action name, not a secret
+AUTH_PASSWORD_RESET_REQUESTED = (
+    "auth.password_reset_requested"  # noqa: S105 -- action name, not a secret
+)
+AUTH_PASSWORD_RESET_COMPLETED = (
+    "auth.password_reset_completed"  # noqa: S105 -- action name, not a secret
+)
 AUTH_EMAIL_VERIFIED = "auth.email_verified"
 AUTH_EMAIL_VERIFICATION_RESENT = "auth.email_verification_resent"
 AUTH_ACCOUNT_DELETED = "auth.account_deleted"
@@ -38,6 +42,7 @@ PHONE_NUMBER_UPDATED = "whatsapp.phone_number_updated"
 CONVERSATION_STATUS_CHANGED = "conversation.status_changed"
 PHONE_NUMBERS_SYNCED = "whatsapp.phone_numbers_synced"
 PHONE_NUMBER_CONNECTED = "whatsapp.phone_number_connected"
+EMBEDDED_SIGNUP_COMPLETED = "whatsapp.embedded_signup_completed"
 
 TEMPLATES_SYNCED = "template.synced"
 TEMPLATE_CREATED = "template.created"

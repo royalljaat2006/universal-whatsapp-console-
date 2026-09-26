@@ -7,6 +7,7 @@ Credentials are write-only: no endpoint ever returns a token.
 
 from typing import Any
 
+from django.conf import settings
 from django.db import transaction
 from django.db.models import Count, QuerySet
 from rest_framework import generics, serializers, status
@@ -25,6 +26,7 @@ from apps.whatsapp.models import (
     WhatsAppPhoneNumber,
 )
 from apps.whatsapp.services import (
+    complete_embedded_signup,
     create_credential_reference,
     create_encrypted_credential,
     register_business_account,
@@ -216,6 +218,72 @@ class BusinessAccountListCreateView(OrganizationScopedMixin, generics.ListAPIVie
                 request=request,
             )
             _queue(connect_business_account, str(account.pk))
+        account = _annotated_accounts(WhatsAppBusinessAccount.objects.filter(pk=account.pk)).get()
+        return Response(BusinessAccountSerializer(account).data, status=status.HTTP_202_ACCEPTED)
+
+
+# ---------------------------------------------------------------------------
+# Embedded Signup
+# ---------------------------------------------------------------------------
+
+
+class EmbeddedSignupConfigView(OrganizationScopedMixin, APIView):
+    """Non-secret values the frontend needs to launch the Facebook JS SDK.
+    Gated the same as connecting a WABA: only someone who could complete the
+    flow needs to see the launch config."""
+
+    required_permissions = {"get": "numbers.manage"}
+
+    def get(self, request: Request, *args: Any, **kwargs: Any) -> Response:
+        return Response(
+            {
+                "app_id": settings.META_APP_ID,
+                "config_id": settings.META_EMBEDDED_SIGNUP_CONFIG_ID,
+                "graph_api_version": settings.META_GRAPH_API_VERSION,
+                "configured": bool(
+                    settings.META_APP_ID and settings.META_EMBEDDED_SIGNUP_CONFIG_ID
+                ),
+            }
+        )
+
+
+class EmbeddedSignupCompleteSerializer(serializers.Serializer):
+    business_id = serializers.UUIDField()
+    waba_id = serializers.RegexField(r"^\d{5,32}$", help_text="WABA ID from the FINISH event")
+    phone_number_id = serializers.RegexField(
+        r"^\d{5,32}$", help_text="Phone number ID from the FINISH event"
+    )
+    code = serializers.CharField(max_length=2048, trim_whitespace=False)
+
+
+class EmbeddedSignupCompleteView(OrganizationScopedMixin, APIView):
+    """POST {business_id, waba_id, phone_number_id, code} — the data Embedded
+    Signup's message event and FB.login callback hand back to the frontend.
+    Exchanges the code, connects the WABA, and queues the same verify ->
+    subscribe -> sync pipeline the manual connect flow uses."""
+
+    required_permissions = {"post": "numbers.manage"}
+
+    def post(self, request: Request, *args: Any, **kwargs: Any) -> Response:
+        from apps.whatsapp.tasks import connect_business_account
+
+        payload = EmbeddedSignupCompleteSerializer(data=request.data)
+        payload.is_valid(raise_exception=True)
+        data = payload.validated_data
+        business = get_business_for_membership(self.membership, data["business_id"])
+        # Not wrapped in a transaction: this calls Meta twice (code exchange,
+        # phone registration) around the DB writes, and provider calls never
+        # run inside a database transaction (see module docstring).
+        account = complete_embedded_signup(
+            organization=self.organization,
+            business=business,
+            waba_id=data["waba_id"],
+            phone_number_id=data["phone_number_id"],
+            code=data["code"],
+            actor=request.user,
+            request=request,
+        )
+        _queue(connect_business_account, str(account.pk))
         account = _annotated_accounts(WhatsAppBusinessAccount.objects.filter(pk=account.pk)).get()
         return Response(BusinessAccountSerializer(account).data, status=status.HTTP_202_ACCEPTED)
 

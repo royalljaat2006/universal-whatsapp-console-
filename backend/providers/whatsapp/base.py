@@ -96,6 +96,17 @@ class WhatsAppProvider(ABC):
     @abstractmethod
     def health_check(self, sender: SenderRef) -> HealthStatus: ...
 
+    # -- onboarding (Embedded Signup) ----------------------------------------
+    @abstractmethod
+    def exchange_code_for_token(self, code: str) -> str:
+        """Exchange a short-lived Embedded Signup authorization code for a
+        long-lived business token, scoped to the assets the customer granted."""
+
+    @abstractmethod
+    def register_phone_number(self, sender: SenderRef, *, pin: str) -> None:
+        """Enable Cloud API messaging for a number connected through Embedded
+        Signup and set its two-step verification PIN."""
+
 
 class WebhookAdapter(ABC):
     """Inbound side: authenticate and normalise provider webhook deliveries."""
