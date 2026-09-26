@@ -376,6 +376,16 @@ export interface AccountEvent {
   occurred_at: ISODateTime;
 }
 
+export interface Member {
+  id: UUID;
+  email: string;
+  full_name: string;
+  role: string;
+  status: string;
+  joined_at: ISODateTime | null;
+  created_at: ISODateTime;
+}
+
 export interface AccessRow {
   membership_id: UUID;
   email: string;
@@ -765,6 +775,23 @@ export interface ProvisionedOrganization extends PlatformOrganization {
     token: string;
     accept_path: string;
   };
+}
+
+export interface Invitation {
+  id: UUID;
+  email: string;
+  role: string;
+  status: "pending" | "accepted" | "revoked";
+  invited_by_email: string;
+  expires_at: ISODateTime;
+  accepted_at: ISODateTime | null;
+  created_at: ISODateTime;
+}
+
+export interface CreatedInvitation extends Invitation {
+  /** Shown exactly once — only its hash is ever stored server-side. */
+  token: string;
+  accept_path: string;
 }
 
 export interface PlatformAuditEntry {

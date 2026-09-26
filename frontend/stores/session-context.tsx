@@ -22,6 +22,9 @@ interface SessionState {
   loading: boolean;
   selectOrganization: (organizationId: string) => void;
   selectBusiness: (businessId: string) => void;
+  /** Re-fetches the business list (e.g. after creating one) and, once loaded,
+   * makes it the active business. */
+  refreshBusinesses: (selectId?: string) => void;
   hasPermission: (code: string) => boolean;
   logout: () => Promise<void>;
 }
@@ -107,6 +110,25 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     };
   }, [activeId]);
 
+  const refreshBusinesses = useCallback(
+    (selectId?: string) => {
+      if (!activeId) return;
+      businessService
+        .list()
+        .then((items) => {
+          setBusinesses({ orgId: activeId, items });
+          const preferred = selectId ?? readStored(businessKey(activeId));
+          const next = items.find((b) => b.id === preferred) ?? items[0];
+          if (next) {
+            store(businessKey(activeId), next.id);
+            setBusinessId(next.id);
+          }
+        })
+        .catch(() => undefined);
+    },
+    [activeId],
+  );
+
   const businessItems = useMemo(
     () => (businesses && businesses.orgId === activeId ? businesses.items : []),
     [businesses, activeId],
@@ -147,6 +169,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       loading: loading || (Boolean(activeId) && businesses?.orgId !== activeId),
       selectOrganization,
       selectBusiness,
+      refreshBusinesses,
       hasPermission,
       logout,
     }),
@@ -161,6 +184,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       businesses,
       selectOrganization,
       selectBusiness,
+      refreshBusinesses,
       hasPermission,
       logout,
     ],

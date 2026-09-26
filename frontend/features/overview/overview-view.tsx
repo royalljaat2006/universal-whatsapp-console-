@@ -24,6 +24,8 @@ import { inboxService } from "@/services/inbox";
 import { whatsappService } from "@/services/whatsapp";
 import { useSession } from "@/stores/session-context";
 
+import { OnboardingChecklist } from "./onboarding-checklist";
+
 const HEALTH_LABELS: Record<string, string> = {
   database: "PostgreSQL",
   migrations: "Database migrations",
@@ -78,6 +80,8 @@ export function OverviewView() {
         title={business ? business.name : "Overview"}
         description={`Welcome back${user?.full_name ? `, ${user.full_name.split(" ")[0]}` : ""}. Here is what is happening today.`}
       />
+
+      <OnboardingChecklist numbers={numbers.data?.results} />
 
       {hasPermission("analytics.view") ? (
         <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">

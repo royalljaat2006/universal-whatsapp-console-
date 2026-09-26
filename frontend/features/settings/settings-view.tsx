@@ -8,6 +8,7 @@ import {
   SmartphoneIcon,
   TagIcon,
   UserIcon,
+  UserPlusIcon,
   UsersIcon,
 } from "lucide-react";
 import { useState } from "react";
@@ -17,37 +18,16 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { PageHeader, Panel } from "@/components/ui/page";
 import { Input } from "@/components/ui/input";
+import { useAction } from "@/hooks/use-action";
 import { useApiQuery } from "@/hooks/use-api-query";
-import type { ApiError } from "@/lib/api/errors";
-import { toApiError } from "@/lib/format";
 import { accessService, memberScopeService, teamService } from "@/services/access";
 import { tagService } from "@/services/contacts";
 import { cn } from "@/lib/utils";
 import { useSession } from "@/stores/session-context";
 
-import { AccountSettings, AuditLog, WhatsAppSettings, Workspace } from "./settings-sections";
+import { AccountSettings, AuditLog, Members, WhatsAppSettings, Workspace } from "./settings-sections";
 
-function useAction(onDone: () => void) {
-  const [error, setError] = useState<ApiError | null>(null);
-  const [busy, setBusy] = useState(false);
-  async function run(action: () => Promise<unknown>): Promise<boolean> {
-    setError(null);
-    setBusy(true);
-    try {
-      await action();
-      onDone();
-      return true;
-    } catch (cause) {
-      setError(toApiError(cause));
-      return false;
-    } finally {
-      setBusy(false);
-    }
-  }
-  return { run, error, busy };
-}
-
-type SectionId = "workspace" | "account" | "access" | "whatsapp" | "teams" | "tags" | "audit";
+type SectionId = "workspace" | "account" | "members" | "access" | "whatsapp" | "teams" | "tags" | "audit";
 
 export function SettingsView() {
   const { business, hasPermission } = useSession();
@@ -56,6 +36,7 @@ export function SettingsView() {
     // Always available — this is about the signed-in person, not an
     // organization permission.
     { id: "account", label: "Your account", icon: UserIcon, allowed: true },
+    { id: "members", label: "Members", icon: UserPlusIcon, allowed: hasPermission("members.view") },
     { id: "access", label: "Business access", icon: KeyRoundIcon, allowed: hasPermission("members.manage") },
     {
       id: "whatsapp",
@@ -101,6 +82,7 @@ export function SettingsView() {
         <div className="min-w-0">
           {active?.id === "workspace" ? <Workspace /> : null}
           {active?.id === "account" ? <AccountSettings /> : null}
+          {active?.id === "members" ? <Members canManage={hasPermission("members.manage")} /> : null}
           {active?.id === "access" ? (
             business ? (
               <BusinessAccess businessId={business.id} />

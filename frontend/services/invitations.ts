@@ -1,6 +1,6 @@
 import { api } from "@/lib/api/client";
 import { authService } from "@/services/auth";
-import type { OrgRoleKey } from "@/types/api";
+import type { CreatedInvitation, Invitation, OrgRoleKey } from "@/types/api";
 
 export interface InvitationPreview {
   organization_name: string;
@@ -30,4 +30,19 @@ export const invitationService = {
       unscoped: true,
     });
   },
+};
+
+/** Tenant-scoped (members.view/members.manage) — inviting/managing teammates
+ * of the caller's own organization, as opposed to the public preview/accept
+ * flow above. No email is sent server-side; share the returned link manually. */
+export const teamInvitationService = {
+  list: () => api.get<Invitation[]>("/api/v1/organizations/current/invitations/", { noBusiness: true }),
+  create: (email: string, roleKey: OrgRoleKey) =>
+    api.post<CreatedInvitation>(
+      "/api/v1/organizations/current/invitations/",
+      { email, role_key: roleKey },
+      { noBusiness: true },
+    ),
+  revoke: (id: string) =>
+    api.delete<void>(`/api/v1/organizations/current/invitations/${id}/`, { noBusiness: true }),
 };
