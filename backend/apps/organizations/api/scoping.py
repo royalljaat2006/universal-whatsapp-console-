@@ -27,6 +27,7 @@ from apps.organizations.models import Membership, Organization
 from apps.organizations.services import get_active_membership, has_permission
 from core.context import organization_id_var
 from core.exceptions import OrganizationRequiredError
+from core.middleware import set_rls_organization
 
 ORGANIZATION_HEADER = "X-Organization-ID"
 BUSINESS_HEADER = "X-Business-ID"
@@ -109,6 +110,7 @@ class OrganizationScopedMixin(APIView):
             request.membership = membership  # type: ignore[attr-defined]
             request.organization = membership.organization  # type: ignore[attr-defined]
             organization_id_var.set(str(membership.organization_id))
+            set_rls_organization(membership.organization_id)
             request.business = resolve_business(request, membership)  # type: ignore[attr-defined]
         super().initial(request, *args, **kwargs)
 

@@ -35,6 +35,10 @@ jobs:
       - run: uv run mypy .
       - run: uv run python manage.py makemigrations --check --dry-run
       - run: uv run pytest
+      # pip-audit has no severity filter (PyPI/OSV advisories don't
+      # consistently carry one) — it fails the build on any known
+      # vulnerability in a resolved dependency, direct or transitive.
+      - run: uv run pip-audit
 
   frontend:
     runs-on: ubuntu-latest
@@ -54,6 +58,11 @@ jobs:
       - run: npm run format:check
       - run: npm test
       - run: npm run build
+      # Fails only on critical-severity advisories — high/moderate/low are
+      # visible in the log but don't block the build (npm audit's default
+      # `--audit-level=low` is too noisy for CI; critical is the bar that
+      # warrants stopping a merge).
+      - run: npm audit --audit-level=critical
 
   e2e:
     runs-on: ubuntu-latest

@@ -215,7 +215,8 @@ export type RealtimeEventName =
   | "number.status_changed"
   | "account.alert"
   | "campaign.updated"
-  | "campaign.progress";
+  | "campaign.progress"
+  | "notification.created";
 
 export interface RealtimeMessageEvent {
   id: UUID;
@@ -426,6 +427,25 @@ export interface AccountEvent {
   summary: string;
   payload: Record<string, unknown>;
   occurred_at: ISODateTime;
+}
+
+// ---------------------------------------------------------------------------
+// Notifications
+// ---------------------------------------------------------------------------
+
+export interface Notification {
+  id: UUID;
+  kind: string;
+  title: string;
+  body: string;
+  data: Record<string, unknown>;
+  read_at: ISODateTime | null;
+  created_at: ISODateTime;
+}
+
+export interface NotificationPreferences {
+  muted_kinds: string[];
+  available_kinds: Record<string, string>;
 }
 
 export interface Member {
@@ -876,4 +896,48 @@ export interface OperationsSummary {
   organizations: { total: number; active: number; suspended: number };
   webhooks_last_24h: { dead: number; failed: number; processed: number; partial: number };
   infrastructure: Record<string, HealthCheckResult>;
+}
+
+export interface PlatformWebhookEvent {
+  id: UUID;
+  provider: string;
+  organization_ids: UUID[];
+  object_type: string;
+  fields: string[];
+  status: "pending" | "processing" | "processed" | "partial" | "failed" | "dead";
+  attempts: number;
+  received_at: ISODateTime;
+  processed_at: ISODateTime | null;
+  next_attempt_at: ISODateTime | null;
+  last_error: string;
+  request_id: string;
+}
+
+export interface FailedJob {
+  id: UUID;
+  organization_id: UUID;
+  business_id: UUID;
+  updated_at: ISODateTime;
+}
+
+export interface FailedCampaign extends FailedJob {
+  name: string;
+  failure_code: string;
+  failure_reason: string;
+}
+
+export interface FailedContactImport extends FailedJob {
+  filename: string;
+  error: string;
+}
+
+export interface FailedExport extends FailedJob {
+  kind: string;
+  error: string;
+}
+
+export interface FailedJobsSummary {
+  campaigns: FailedCampaign[];
+  contact_imports: FailedContactImport[];
+  exports: FailedExport[];
 }

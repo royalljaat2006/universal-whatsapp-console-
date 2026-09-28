@@ -80,6 +80,10 @@ MIDDLEWARE = [
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
     "core.middleware.AccessLogMiddleware",
+    # Last: wraps only the view's own DB work in one transaction, so
+    # OrganizationScopedMixin can SET LOCAL the tenant context for Postgres
+    # RLS policies (core/migrations/0001_row_level_security.py) to see.
+    "core.middleware.RowLevelSecurityMiddleware",
 ]
 
 ROOT_URLCONF = "config.urls"
@@ -104,6 +108,12 @@ TEMPLATES = [
 # ---------------------------------------------------------------------------
 # Data stores
 # ---------------------------------------------------------------------------
+# The connection always authenticates as the table-owning role (DATABASE_URL)
+# — Postgres always lets a table's owner bypass Row-Level Security, so
+# migrations and system-context code (webhooks, admin, workers) keep working
+# unscoped exactly as before. Tenant-scoped requests instead switch to the
+# restricted `whatsapp_platform_app` role transaction-locally, via `SET LOCAL
+# ROLE` in core.middleware.set_rls_organization — see docs/security.md.
 DATABASES = {"default": env.db("DATABASE_URL")}
 DATABASES["default"]["CONN_MAX_AGE"] = env.int("DATABASE_CONN_MAX_AGE", default=60)
 DATABASES["default"]["CONN_HEALTH_CHECKS"] = True
@@ -325,6 +335,12 @@ PUBLIC_BASE_URL = env.str("PUBLIC_BASE_URL", default="http://localhost:8080").rs
 # ---------------------------------------------------------------------------
 LOG_LEVEL = env.str("LOG_LEVEL", default="INFO")
 LOG_FORMAT = env.str("LOG_FORMAT", default="json")
+
+# Bearer token for GET /metrics (Prometheus scrape target — core.metrics).
+# Empty (the default) means the endpoint is disabled (404), not open: an
+# operator sets this only once they have a Prometheus configured to scrape
+# it. See infrastructure/monitoring/README.md.
+METRICS_TOKEN = env.str("METRICS_TOKEN", default="")
 
 LOGGING: dict[str, Any] = {
     "version": 1,

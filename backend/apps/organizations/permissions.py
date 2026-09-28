@@ -41,6 +41,8 @@ PERMISSIONS: Final[dict[str, str]] = {
     "webhooks.view": "View raw webhook events",
     "webhooks.replay": "Replay webhook events",
     "api_keys.manage": "Create and revoke API keys",
+    "notifications.view": "View own in-app notifications",
+    "notifications.manage": "Mark own notifications read and manage own notification preferences",
 }
 
 _VIEW_ONLY = {code for code in PERMISSIONS if code.endswith(".view")} - {
@@ -76,6 +78,7 @@ DEFAULT_ROLES: Final[dict[str, dict[str, object]]] = {
             "campaigns.launch",
             "billing.view",
             "reports.export",
+            "notifications.manage",
         },
     },
     "agent": {
@@ -90,12 +93,14 @@ DEFAULT_ROLES: Final[dict[str, dict[str, object]]] = {
             "conversations.view",
             "messages.send",
             "teams.view",
+            "notifications.view",
+            "notifications.manage",
         },
     },
     "viewer": {
         "name": "Viewer",
         "description": "Read-only access to operational data.",
-        "permissions": set(_VIEW_ONLY),
+        "permissions": set(_VIEW_ONLY) | {"notifications.manage"},
     },
 }
 

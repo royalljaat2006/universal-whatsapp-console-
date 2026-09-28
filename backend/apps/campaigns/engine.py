@@ -40,6 +40,7 @@ from apps.campaigns import audience as audience_mod
 from apps.campaigns import checks, progress, variables
 from apps.campaigns.models import Campaign, CampaignEvent, CampaignRecipient
 from apps.contacts.models import ContactIdentity
+from apps.notifications import services as notifications
 from apps.messaging.services.errors import (
     PhoneNumberNotReadyError,
     TemplateNotSendableError,
@@ -147,6 +148,23 @@ def _safe_delay(task: Any, *args: Any) -> None:
         logger.exception("could not enqueue campaign task", extra={"task": task.name})
 
 
+def _notify_campaign_finished(campaign: Campaign, kind: str, title: str) -> None:
+    if campaign.launched_by_id is None:
+        return
+    from apps.organizations.services import get_active_membership
+
+    membership = get_active_membership(campaign.launched_by, campaign.organization_id)
+    if membership is not None:
+        notifications.notify(
+            organization=campaign.organization,
+            recipient=membership,
+            kind=kind,
+            title=title,
+            body=campaign.name,
+            data={"campaign_id": str(campaign.pk)},
+        )
+
+
 def _fail_campaign(campaign: Campaign, code: str, reason: str) -> None:
     campaign.status = S.FAILED
     campaign.failure_code = code[:64]
@@ -154,6 +172,7 @@ def _fail_campaign(campaign: Campaign, code: str, reason: str) -> None:
     campaign.save(update_fields=["status", "failure_code", "failure_reason", "updated_at"])
     record_event(campaign, "failed", code=code, reason=reason[:500])
     progress.publish_updated(campaign)
+    _notify_campaign_finished(campaign, notifications.KIND_CAMPAIGN_FAILED, "Campaign failed")
     logger.warning("campaign failed", extra={"campaign_id": str(campaign.pk), "code": code})
 
 
@@ -456,6 +475,9 @@ def tick(campaign_id: Any) -> TickResult:
             campaign.save(update_fields=["status", "completed_at", "updated_at"])
             record_event(campaign, "completed", **progress.counts(campaign.pk)["by_status"])
             progress.publish_updated(campaign)
+            _notify_campaign_finished(
+                campaign, notifications.KIND_CAMPAIGN_COMPLETED, "Campaign completed"
+            )
             return TickResult(S.COMPLETED, dispatched)
         progress.publish_progress(campaign.pk, business_id=campaign.business_id, force=True)
         _schedule_tick(campaign.pk, countdown=tick_seconds)

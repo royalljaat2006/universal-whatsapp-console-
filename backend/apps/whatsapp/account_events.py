@@ -27,6 +27,7 @@ from django.db import IntegrityError, transaction
 from django.utils import timezone
 
 from apps.messaging.services import events
+from apps.notifications import services as notifications
 from apps.whatsapp.models import (
     ConnectionState,
     WhatsAppAccountEvent,
@@ -170,4 +171,14 @@ def handle_account_event(
         events.number_status_changed(number)
     if severity != Severity.INFO or field == "account_update":
         events.account_alert(record)
+    if severity in (Severity.WARNING, Severity.CRITICAL):
+        label = account.name or "WhatsApp account"
+        notifications.notify_members_with_permission(
+            organization=account.organization,
+            permission_code="numbers.manage",
+            kind=notifications.KIND_ACCOUNT_ALERT,
+            title=f"{label}: attention needed",
+            body=summary,
+            data={"business_account_id": str(account.pk), "field": field, "severity": severity},
+        )
     return record

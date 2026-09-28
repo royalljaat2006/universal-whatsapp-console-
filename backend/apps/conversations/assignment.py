@@ -16,6 +16,7 @@ from apps.audit.services import record as audit
 from apps.businesses.services import can_access_business
 from apps.conversations.models import Conversation, ConversationAssignment
 from apps.messaging.services import events
+from apps.notifications import services as notifications
 from apps.organizations.models import Membership
 from apps.teams.models import Team
 from core.exceptions import DomainError
@@ -89,4 +90,13 @@ def assign(
         request=request,
     )
     events.conversation_assigned(conversation)
+    if new_membership is not None and new_membership.user_id != getattr(actor, "pk", None):
+        notifications.notify(
+            organization=conversation.organization,
+            recipient=new_membership,
+            kind=notifications.KIND_CONVERSATION_ASSIGNED,
+            title="A conversation was assigned to you",
+            body=conversation.last_message_preview or "",
+            data={"conversation_id": str(conversation.pk), "business_id": str(conversation.business_id)},
+        )
     return conversation

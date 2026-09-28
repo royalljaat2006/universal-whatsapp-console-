@@ -16,6 +16,7 @@ dependencies = [
     "httpx>=0.28,<1",
     "cryptography>=44",
     "drf-spectacular>=0.28",
+    "prometheus-client>=0.21",
 ]
 
 [dependency-groups]
@@ -29,6 +30,7 @@ dev = [
     "djangorestframework-stubs>=3.16",
     "celery-types>=0.23",
     "daphne>=4.2.3",
+    "pip-audit>=2.7",
 ]
 
 [tool.uv]

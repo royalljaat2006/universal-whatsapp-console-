@@ -3,6 +3,7 @@
 /api/v1/...        versioned REST API (JSON, session auth, tenant-scoped)
 /webhooks/v1/...   provider callbacks (signature-verified, no session)
 /health/...        liveness / readiness
+/metrics           Prometheus scrape target, token-gated (core.metrics)
 /ws/v1/...         WebSockets (routed in config/asgi.py)
 """
 
@@ -16,10 +17,12 @@ from apps.businesses.access_api import BusinessAccessRevokeView, BusinessAccessV
 from apps.contacts import api as contacts_api
 from apps.conversations import api as conversations_api
 from apps.messaging.api import MessageStatusHistoryView
+from apps.notifications import api as notifications_api
 from apps.organizations.api import invitations as invitations_api
 from apps.teams import api as teams_api
 from apps.templates import api as templates_api
 from apps.webhooks.views import meta_whatsapp_webhook
+from core.health import views as health_views
 
 api_v1: list[URLPattern | URLResolver] = [
     path("auth/", include("apps.identity.urls")),
@@ -135,6 +138,27 @@ api_v1: list[URLPattern | URLResolver] = [
         name="template-detail",
     ),
     path("audit-logs/", AuditLogListView.as_view(), name="audit-log-list"),
+    path("notifications/", notifications_api.NotificationListView.as_view(), name="notification-list"),
+    path(
+        "notifications/unread-count/",
+        notifications_api.NotificationUnreadCountView.as_view(),
+        name="notification-unread-count",
+    ),
+    path(
+        "notifications/read-all/",
+        notifications_api.NotificationMarkAllReadView.as_view(),
+        name="notification-read-all",
+    ),
+    path(
+        "notifications/preferences/",
+        notifications_api.NotificationPreferenceView.as_view(),
+        name="notification-preferences",
+    ),
+    path(
+        "notifications/<uuid:pk>/read/",
+        notifications_api.NotificationMarkReadView.as_view(),
+        name="notification-mark-read",
+    ),
     path(
         "invitations/<uuid:pk>/",
         invitations_api.InvitationPreviewView.as_view(),
@@ -162,5 +186,6 @@ urlpatterns = [
     path("webhooks/v1/meta/whatsapp/", meta_whatsapp_webhook, name="webhook-meta-whatsapp"),
     path("webhooks/v1/meta/whatsapp", meta_whatsapp_webhook),
     path("health/", include("core.health.urls")),
+    path("metrics", health_views.metrics, name="metrics"),
     path("admin/", admin.site.urls),
 ]

@@ -1,10 +1,12 @@
 import { api } from "@/lib/api/client";
 import type {
   CursorPage,
+  FailedJobsSummary,
   OperationsSummary,
   OrgRoleKey,
   PlatformAuditEntry,
   PlatformOrganization,
+  PlatformWebhookEvent,
   ProvisionedOrganization,
 } from "@/types/api";
 
@@ -34,4 +36,14 @@ export const platformService = {
       query,
     }),
   operations: () => api.get<OperationsSummary>("/api/v1/platform/operations/", { unscoped: true }),
+  failedJobs: () => api.get<FailedJobsSummary>("/api/v1/platform/failed-jobs/", { unscoped: true }),
+  webhookEvents: (query: { status?: string; organization_id?: string }) =>
+    api.get<CursorPage<PlatformWebhookEvent>>("/api/v1/platform/webhook-events/", {
+      unscoped: true,
+      query,
+    }),
+  replayWebhookEvent: (id: string) =>
+    api.post<PlatformWebhookEvent>(`/api/v1/platform/webhook-events/${id}/replay/`, undefined, {
+      unscoped: true,
+    }),
 };

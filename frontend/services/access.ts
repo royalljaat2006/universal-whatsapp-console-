@@ -1,5 +1,5 @@
 import { api } from "@/lib/api/client";
-import type { AccessRow, AccountEvent, CursorPage } from "@/types/api";
+import type { AccessRow, AccountEvent, CursorPage, Notification, NotificationPreferences } from "@/types/api";
 
 export const accessService = {
   list: (businessId: string) =>
@@ -19,6 +19,28 @@ export const accessService = {
 
 export const eventService = {
   list: () => api.get<CursorPage<AccountEvent>>("/api/v1/whatsapp/events/"),
+};
+
+export const notificationService = {
+  list: (unreadOnly?: boolean) =>
+    api.get<CursorPage<Notification>>("/api/v1/notifications/", {
+      noBusiness: true,
+      query: unreadOnly ? { unread: "true" } : undefined,
+    }),
+  unreadCount: () =>
+    api.get<{ unread_count: number }>("/api/v1/notifications/unread-count/", { noBusiness: true }),
+  markRead: (id: string) =>
+    api.post<Notification>(`/api/v1/notifications/${id}/read/`, undefined, { noBusiness: true }),
+  markAllRead: () =>
+    api.post<{ marked_read: number }>("/api/v1/notifications/read-all/", undefined, { noBusiness: true }),
+  preferences: () =>
+    api.get<NotificationPreferences>("/api/v1/notifications/preferences/", { noBusiness: true }),
+  updatePreferences: (mutedKinds: string[]) =>
+    api.patch<NotificationPreferences>(
+      "/api/v1/notifications/preferences/",
+      { muted_kinds: mutedKinds },
+      { noBusiness: true },
+    ),
 };
 
 export const memberScopeService = {

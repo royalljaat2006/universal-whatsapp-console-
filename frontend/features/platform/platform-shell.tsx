@@ -1,6 +1,13 @@
 "use client";
 
-import { ActivityIcon, Building2Icon, LockIcon, LogOutIcon, ScrollTextIcon } from "lucide-react";
+import {
+  ActivityIcon,
+  AlertTriangleIcon,
+  Building2Icon,
+  LockIcon,
+  LogOutIcon,
+  ScrollTextIcon,
+} from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
@@ -15,6 +22,7 @@ const NAV = [
   { href: "/platform", label: "Organizations", icon: Building2Icon },
   { href: "/platform/audit-logs", label: "Audit log", icon: ScrollTextIcon },
   { href: "/platform/operations", label: "Operations", icon: ActivityIcon },
+  { href: "/platform/failed-jobs", label: "Failed jobs", icon: AlertTriangleIcon },
 ];
 
 /**

@@ -1,0 +1,78 @@
+# Prometheus alerting rules for the /metrics endpoint (core.metrics). This
+# file is configuration only — nothing here runs anything. Load it into an
+# operator's own self-hosted Prometheus (`rule_files: ["alerts.yml"]`) once
+# one exists; see infrastructure/monitoring/README.md for the scrape config.
+# Each rule operationalises a signal already listed in that README's
+# "Signals to alert on now" table.
+
+groups:
+  - name: whatsapp-platform
+    rules:
+      - alert: DependencyDown
+        expr: dependency_up == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $labels.dependency }} is not answering its health probe"
+          description: >-
+            core.health.checks reported {{ $labels.dependency }} as down for
+            2 minutes. Check /health/ready and /health/dependencies.
+
+      - alert: NoCeleryWorkers
+        expr: celery_workers_online == 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "No Celery workers responded to a control ping"
+          description: >-
+            Outbound sends, webhook processing and campaigns are not being
+            worked. Check the worker container/process.
+
+      - alert: CeleryQueueBacklog
+        expr: celery_queue_depth > 500
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Queue {{ $labels.queue }} has {{ $value }} pending tasks"
+          description: >-
+            Sustained backlog on a Celery queue — a worker may be down for
+            that queue, or throughput can't keep up with intake.
+
+      - alert: WebhookEventsDead
+        expr: webhook_events_by_status{status="dead"} > 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $value }} webhook event(s) permanently failed"
+          description: >-
+            Events in WebhookEvent with status='dead' were retried past
+            WEBHOOK_MAX_PROCESSING_ATTEMPTS and will never be processed
+            automatically. Needs manual investigation/replay.
+
+      - alert: MessageFailuresElevated
+        expr: sum(messages_failed_by_error_code) > 20
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $value }} outbound messages failed in the last 24h"
+          description: >-
+            Break down by apps.messaging.services.failure_categories via
+            messages_failed_by_error_code{error_code=...}. PROVIDER_AUTH_FAILED
+            means a token expired or was revoked; PROVIDER_OUTCOME_UNKNOWN
+            needs human review (see infrastructure/monitoring/README.md).
+
+      - alert: HighHttpErrorRate
+        expr: >-
+          sum(rate(http_request_duration_seconds_count{status=~"5.."}[5m]))
+          / sum(rate(http_request_duration_seconds_count[5m])) > 0.05
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Over 5% of requests are returning 5xx"
+          description: "Sustained server error rate across the API."

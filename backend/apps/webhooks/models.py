@@ -3,6 +3,7 @@ delivery. Domain state is always *derived* from these rows by the processor,
 so fixing a processor bug and replaying events repairs state."""
 
 from django.contrib.postgres.fields import ArrayField
+from django.contrib.postgres.indexes import GinIndex
 from django.db import models
 
 from core.models import BaseModel
@@ -54,6 +55,11 @@ class WebhookEvent(BaseModel):
             ),
             models.Index(fields=["-received_at"], name="webhook_received_idx"),
             models.Index(fields=["status", "-received_at"], name="webhook_status_received_idx"),
+            # apps.platform.api.PlatformWebhookEventListView filters by
+            # organization_ids__contains=[org_id] for cross-tenant support
+            # triage — without this, that's a sequential scan as the table
+            # grows (one row per inbound webhook delivery).
+            GinIndex(fields=["organization_ids"], name="webhook_org_ids_gin_idx"),
         ]
 
     def __str__(self) -> str:

@@ -75,7 +75,64 @@ same-origin referrer policy.
    `tests/api/test_business_isolation.py`.
 6. WebSocket groups are per business, joined only after membership,
    permission and business-access checks.
-7. Planned defence in depth: PostgreSQL row-level security (ADR-001).
+7. **Row-level security (defence in depth, always on):** see
+   [Row-level security](#row-level-security) below.
+
+### Row-level security
+
+`core/migrations/0001_row_level_security.py` (plus
+`0002_notification_preference_rls.py`, added when `NotificationPreference`
+was introduced) enables Postgres RLS as a second, database-enforced layer
+under the application-layer scoping above — it does not replace it. A
+restricted role, `whatsapp_platform_app`, is created `NOLOGIN NOBYPASSRLS`
+without table ownership (Postgres RLS is always bypassed by a table's owner
+and by superusers, so the owning migration role could never be restricted
+this way). Every `TenantScopedModel` table (32 tables) gets a policy
+requiring `organization_id` to match the Postgres session variable
+`app.current_org_id`; an unset value is `NULL`, which matches no row (fails
+closed). `organizations_role`, `organizations_membership` and
+`organizations_invitation` are deliberately excluded from the policy —
+resolving *which* organization a request belongs to means querying
+Membership before any session variable can be set, so a strict policy there
+would break authentication itself; these three keep only the existing
+app-layer checks. Every table (including non-tenant ones like
+`identity_user`, Django's own tables, and future tables via `ALTER DEFAULT
+PRIVILEGES`) is granted ordinary CRUD so the app role can function —
+isolation comes from the policies, not from withholding grants.
+
+Nobody ever connects to Postgres *as* `whatsapp_platform_app` — it stays
+`NOLOGIN` permanently. The app's one connection role is instead granted
+**membership** in it (`GRANT whatsapp_platform_app TO <connecting role>`),
+and `core.middleware.set_rls_organization` issues `SET LOCAL ROLE
+whatsapp_platform_app` together with `SET LOCAL` for `app.current_org_id`,
+both scoped to the current transaction only — reverting automatically to
+the owning role when the transaction ends, so neither can leak to the next
+request on a pooled connection (`CONN_MAX_AGE=60`). `set_rls_organization`
+is called from `OrganizationScopedMixin.initial` once a membership's
+organization is resolved, so enforcement is **always on** for every
+authenticated tenant API request — there is no separate connection string
+or environment flag to remember to set. `RowLevelSecurityMiddleware` wraps
+requests under `/api/v1/` (where `OrganizationScopedMixin` lives) in
+`transaction.atomic()` so there is a transaction for `SET LOCAL` to be
+scoped to (Django does not enable `ATOMIC_REQUESTS`); it deliberately
+leaves webhook, health, admin and static/media paths unwrapped, since those
+never call `set_rls_organization` and some (webhook ingestion) need
+unscoped, cross-tenant lookups by provider id that the restricted role
+could never satisfy. Migrations, webhook processing, Django admin and
+Celery workers/beat all connect as the plain owning role and are completely
+unaffected — RLS only ever engages for the one code path that explicitly
+opts in.
+
+Verified against a real database, twice — with a temporary
+`APP_DATABASE_URL`-based design initially (superseded, see git history) and
+again with the final `SET LOCAL ROLE` design: with the restricted role
+active and no session variable set, tenant tables return zero rows; with
+the correct `organization_id`, only that tenant's rows; with a different
+`organization_id`, zero rows; and that the role reverts to the owner at
+`COMMIT`. Also verified via the E2E suite (`auth.spec.ts`,
+`onboarding.spec.ts`, `tenant-isolation.spec.ts`), which exercises
+registration, login, business creation and cross-tenant isolation through
+the real API with RLS engaged.
 
 ## Business access management (Cycle 2)
 
