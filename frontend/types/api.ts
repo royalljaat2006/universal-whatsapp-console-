@@ -69,6 +69,25 @@ export interface PermissionCatalogueEntry {
   description: string;
 }
 
+export interface ApiKey {
+  id: UUID;
+  name: string;
+  key_prefix: string;
+  scopes: string[];
+  created_by_email: string;
+  is_active: boolean;
+  expires_at: ISODateTime | null;
+  last_used_at: ISODateTime | null;
+  revoked_at: ISODateTime | null;
+  created_at: ISODateTime;
+}
+
+/** Only the create response ever carries the raw key — shown once, never
+ * retrievable again (the backend stores only its hash). */
+export interface CreatedApiKey extends ApiKey {
+  key: string;
+}
+
 export interface Business {
   id: UUID;
   name: string;

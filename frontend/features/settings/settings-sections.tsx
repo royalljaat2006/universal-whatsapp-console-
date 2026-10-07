@@ -19,13 +19,23 @@ import { useApiQuery } from "@/hooks/use-api-query";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { api } from "@/lib/api/client";
 import { ApiError } from "@/lib/api/errors";
+import { toApiError } from "@/lib/format";
+import { apiKeyService, type CreateApiKeyInput } from "@/services/api-keys";
 import { authService } from "@/services/auth";
 import { businessService } from "@/services/businesses";
 import { teamInvitationService } from "@/services/invitations";
 import { organizationService } from "@/services/organizations";
 import { roleService } from "@/services/roles";
 import { useSession } from "@/stores/session-context";
-import type { CreatedInvitation, CursorPage, OrgRoleKey, PermissionCatalogueEntry, Role } from "@/types/api";
+import type {
+  ApiKey,
+  CreatedApiKey,
+  CreatedInvitation,
+  CursorPage,
+  OrgRoleKey,
+  PermissionCatalogueEntry,
+  Role,
+} from "@/types/api";
 
 export function Workspace() {
   const { active, businesses, user, hasPermission, refreshBusinesses } = useSession();
@@ -757,6 +767,236 @@ export function Roles({ canManage }: { canManage: boolean }) {
             onSubmit={(values) =>
               void run(() => roleService.create(values)).then((ok) => ok && setCreating(false))
             }
+          />
+        </Panel>
+      ) : null}
+    </div>
+  );
+}
+
+function ApiKeyForm({
+  catalogue,
+  busy,
+  onCancel,
+  onSubmit,
+}: {
+  catalogue: PermissionCatalogueEntry[];
+  busy: boolean;
+  onCancel: () => void;
+  onSubmit: (values: CreateApiKeyInput) => void;
+}) {
+  const [name, setName] = useState("");
+  const [expiresAt, setExpiresAt] = useState("");
+  const [scopes, setScopes] = useState(new Set<string>());
+  const groups = groupPermissions(catalogue);
+
+  function toggle(code: string) {
+    setScopes((prev) => {
+      const next = new Set(prev);
+      if (next.has(code)) next.delete(code);
+      else next.add(code);
+      return next;
+    });
+  }
+
+  return (
+    <form
+      className="flex flex-col gap-3"
+      onSubmit={(e) => {
+        e.preventDefault();
+        onSubmit({
+          name: name.trim(),
+          scopes: [...scopes],
+          expires_at: expiresAt ? new Date(expiresAt).toISOString() : null,
+        });
+      }}
+    >
+      <div className="flex flex-wrap gap-2">
+        <div className="flex min-w-48 flex-1 flex-col gap-1.5">
+          <Label htmlFor="apikey-name">Name</Label>
+          <Input
+            id="apikey-name"
+            required
+            placeholder="e.g. Support bot"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+          />
+        </div>
+        <div className="flex min-w-48 flex-1 flex-col gap-1.5">
+          <Label htmlFor="apikey-expires">Expires (optional)</Label>
+          <Input
+            id="apikey-expires"
+            type="date"
+            value={expiresAt}
+            onChange={(e) => setExpiresAt(e.target.value)}
+          />
+        </div>
+      </div>
+      <div className="flex flex-col gap-2">
+        <Label>Scopes — only what this key is allowed to do</Label>
+        <div className="grid gap-3 rounded-md border p-3 sm:grid-cols-2 lg:grid-cols-3">
+          {groups.map(([group, entries]) => (
+            <div key={group} className="flex flex-col gap-1">
+              <span className="text-caption font-medium capitalize">{group}</span>
+              {entries.map((entry) => (
+                <label key={entry.code} className="flex items-start gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    className="mt-0.5"
+                    checked={scopes.has(entry.code)}
+                    onChange={() => toggle(entry.code)}
+                  />
+                  <span>{entry.description}</span>
+                </label>
+              ))}
+            </div>
+          ))}
+        </div>
+      </div>
+      <div className="flex gap-2">
+        <LoadingButton type="submit" loading={busy} disabled={!name.trim() || scopes.size === 0}>
+          Create key
+        </LoadingButton>
+        <Button type="button" variant="ghost" onClick={onCancel}>
+          Cancel
+        </Button>
+      </div>
+    </form>
+  );
+}
+
+/** Keys authenticate as their creator (same tenancy/role rules as a session)
+ * and are further narrowed by `scopes` — see apps.apikeys on the backend.
+ * The raw key is shown exactly once, right after creation; only its hash is
+ * ever stored, so losing it means generating a new key. */
+export function ApiKeys({ canManage }: { canManage: boolean }) {
+  const keys = useApiQuery(() => apiKeyService.list(), []);
+  const catalogue = useApiQuery(() => roleService.permissions(), [], canManage);
+  const { run, error, busy } = useAction(keys.reload);
+  const [creating, setCreating] = useState(false);
+  const [justCreated, setJustCreated] = useState<CreatedApiKey | null>(null);
+  const [createError, setCreateError] = useState<ApiError | null>(null);
+  const [createBusy, setCreateBusy] = useState(false);
+
+  async function createKey(values: CreateApiKeyInput) {
+    setCreateError(null);
+    setCreateBusy(true);
+    try {
+      const created = await apiKeyService.create(values);
+      setJustCreated(created);
+      setCreating(false);
+      keys.reload();
+    } catch (cause) {
+      setCreateError(toApiError(cause));
+    } finally {
+      setCreateBusy(false);
+    }
+  }
+
+  function statusFor(key: ApiKey): { tone: "success" | "neutral" | "danger"; label: string } {
+    if (key.revoked_at) return { tone: "danger", label: "revoked" };
+    if (key.expires_at && new Date(key.expires_at) <= new Date()) return { tone: "neutral", label: "expired" };
+    return { tone: "success", label: "active" };
+  }
+
+  return (
+    <div className="flex flex-col gap-4">
+      {justCreated ? (
+        <Panel title="New key created" bodyClassName="flex flex-col gap-3 p-4">
+          <p className="text-sm">
+            Copy <b>{justCreated.name}</b> now — it won&apos;t be shown again. Only its hash is stored, so a
+            lost key means creating a new one.
+          </p>
+          <CopyLink value={justCreated.key} />
+          <Button size="sm" variant="outline" className="self-start" onClick={() => setJustCreated(null)}>
+            I&apos;ve copied it
+          </Button>
+        </Panel>
+      ) : null}
+
+      <Panel
+        title="API keys"
+        description="Programmatic access for your own integrations and agents — authenticated as you, narrowed to the scopes you pick."
+        actions={
+          canManage && !creating ? (
+            <Button size="sm" onClick={() => setCreating(true)}>
+              New key
+            </Button>
+          ) : null
+        }
+      >
+        {keys.error ? <ErrorState error={keys.error} onRetry={keys.reload} inline className="m-4" /> : null}
+        {error ? <ErrorState error={error} inline className="mx-4 mt-2" /> : null}
+        {!keys.data && !keys.error ? <TableSkeleton rows={3} columns={5} /> : null}
+        {keys.data && keys.data.length === 0 ? (
+          <EmptyState
+            icon={KeyRoundIcon}
+            title="No API keys yet"
+            description="Create one to let your own system send/receive messages or pull analytics without a user session."
+            compact
+          />
+        ) : null}
+        {keys.data && keys.data.length > 0 ? (
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Name</TableHead>
+                <TableHead>Key</TableHead>
+                <TableHead>Scopes</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead>Last used</TableHead>
+                <TableHead />
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {keys.data.map((key) => {
+                const status = statusFor(key);
+                return (
+                  <TableRow key={key.id}>
+                    <TableCell>
+                      <span className="font-medium">{key.name}</span>
+                      <span className="text-caption block">by {key.created_by_email}</span>
+                    </TableCell>
+                    <TableCell className="font-mono text-xs">{key.key_prefix}…</TableCell>
+                    <TableCell className="text-caption">{key.scopes.length} scope(s)</TableCell>
+                    <TableCell>
+                      <StatusBadge tone={toneFor(status.tone)}>{status.label}</StatusBadge>
+                    </TableCell>
+                    <TableCell className="text-caption">
+                      {key.last_used_at ? new Date(key.last_used_at).toLocaleString() : "never"}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      {canManage && !key.revoked_at ? (
+                        <Button
+                          size="xs"
+                          variant="ghost"
+                          disabled={busy}
+                          onClick={() => {
+                            if (window.confirm(`Revoke "${key.name}"? Anything using it stops working immediately.`)) {
+                              void run(() => apiKeyService.revoke(key.id));
+                            }
+                          }}
+                        >
+                          Revoke
+                        </Button>
+                      ) : null}
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
+        ) : null}
+      </Panel>
+
+      {creating && catalogue.data ? (
+        <Panel title="New API key" bodyClassName="flex flex-col gap-2 p-4">
+          {createError ? <ErrorState error={createError} inline /> : null}
+          <ApiKeyForm
+            catalogue={catalogue.data}
+            busy={createBusy}
+            onCancel={() => setCreating(false)}
+            onSubmit={(values) => void createKey(values)}
           />
         </Panel>
       ) : null}

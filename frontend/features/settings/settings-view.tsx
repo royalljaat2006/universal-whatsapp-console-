@@ -2,6 +2,7 @@
 
 import {
   Building2Icon,
+  CodeIcon,
   KeyRoundIcon,
   type LucideIcon,
   ScrollTextIcon,
@@ -26,7 +27,15 @@ import { tagService } from "@/services/contacts";
 import { cn } from "@/lib/utils";
 import { useSession } from "@/stores/session-context";
 
-import { AccountSettings, AuditLog, Members, Roles, WhatsAppSettings, Workspace } from "./settings-sections";
+import {
+  AccountSettings,
+  ApiKeys,
+  AuditLog,
+  Members,
+  Roles,
+  WhatsAppSettings,
+  Workspace,
+} from "./settings-sections";
 
 type SectionId =
   | "workspace"
@@ -34,6 +43,7 @@ type SectionId =
   | "members"
   | "roles"
   | "access"
+  | "apikeys"
   | "whatsapp"
   | "teams"
   | "tags"
@@ -49,6 +59,7 @@ export function SettingsView() {
     { id: "members", label: "Members", icon: UserPlusIcon, allowed: hasPermission("members.view") },
     { id: "roles", label: "Roles", icon: ShieldIcon, allowed: hasPermission("roles.manage") },
     { id: "access", label: "Business access", icon: KeyRoundIcon, allowed: hasPermission("members.manage") },
+    { id: "apikeys", label: "API keys", icon: CodeIcon, allowed: hasPermission("api_keys.manage") },
     {
       id: "whatsapp",
       label: "WhatsApp",
@@ -102,6 +113,7 @@ export function SettingsView() {
               <p className="text-supporting">Create a business to manage its access.</p>
             )
           ) : null}
+          {active?.id === "apikeys" ? <ApiKeys canManage={hasPermission("api_keys.manage")} /> : null}
           {active?.id === "whatsapp" ? <WhatsAppSettings /> : null}
           {active?.id === "teams" ? <Teams canManage={hasPermission("teams.manage")} /> : null}
           {active?.id === "tags" ? (
