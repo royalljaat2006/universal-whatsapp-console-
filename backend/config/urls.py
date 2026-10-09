@@ -132,6 +132,7 @@ api_v1: list[URLPattern | URLResolver] = [
     path("media/", include("apps.media.urls")),
     path("templates/", templates_api.MessageTemplateListView.as_view(), name="template-list"),
     path("templates/sync/", templates_api.TemplateSyncView.as_view(), name="template-sync"),
+    path("templates/create/", templates_api.TemplateCreateView.as_view(), name="template-create"),
     path(
         "templates/<uuid:pk>/",
         templates_api.MessageTemplateDetailView.as_view(),

@@ -3,6 +3,7 @@
 GET  /api/v1/templates/?q=&status=&category=&language=&business_account=&sendable=1
 GET  /api/v1/templates/<id>/          includes the server-derived parameter list
 POST /api/v1/templates/sync/          queue a sync of every WABA of the selected business
+POST /api/v1/templates/create/        submit a new template to Meta for review
 """
 
 from dataclasses import asdict
@@ -19,7 +20,7 @@ from apps.organizations.api.scoping import OrganizationScopedMixin
 from apps.templates.models import MessageTemplate
 from apps.templates.parameters import UnsupportedTemplateError, describe
 from apps.whatsapp.models import WhatsAppBusinessAccount
-from core.exceptions import DomainError
+from core.exceptions import DomainError, NotFoundError
 
 
 class MessageTemplateSerializer(serializers.ModelSerializer):
@@ -136,3 +137,55 @@ class TemplateSyncView(OrganizationScopedMixin, APIView):
         for account_id in ids:
             queue(account_id)
         return Response({"status": "queued", "accounts": len(ids)}, status=status.HTTP_202_ACCEPTED)
+
+
+class TemplateCreateSerializer(serializers.Serializer):
+    business_account_id = serializers.UUIDField()
+    name = serializers.RegexField(
+        r"^[a-z0-9_]{1,512}$",
+        error_messages={"invalid": "Template names may only contain lowercase letters, numbers and underscores."},
+    )
+    language = serializers.CharField(max_length=10)
+    category = serializers.ChoiceField(choices=["MARKETING", "UTILITY", "AUTHENTICATION"])
+    components = serializers.ListField(child=serializers.DictField(), allow_empty=False)
+    parameter_format = serializers.ChoiceField(
+        choices=["POSITIONAL", "NAMED"], required=False, allow_null=True
+    )
+
+    def validate_components(self, value: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        if not any(c.get("type") == "BODY" for c in value):
+            raise serializers.ValidationError("A BODY component is required.")
+        return value
+
+
+class TemplateCreateView(OrganizationScopedMixin, APIView):
+    required_permissions = {"post": "templates.manage"}
+
+    def post(self, request: Request) -> Response:
+        from apps.templates.services import create_template
+
+        serializer = TemplateCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+
+        account = WhatsAppBusinessAccount.objects.for_organization(self.organization).filter(
+            pk=data["business_account_id"]
+        )
+        if self.business is not None:
+            account = account.filter(business=self.business)
+        account_obj = account.first()
+        if account_obj is None:
+            raise NotFoundError("WhatsApp Business Account not found.")
+
+        template = create_template(
+            account_obj,
+            name=data["name"],
+            language=data["language"],
+            category=data["category"],
+            components=data["components"],
+            parameter_format=data.get("parameter_format"),
+            actor=request.user,
+        )
+        return Response(
+            MessageTemplateDetailSerializer(template).data, status=status.HTTP_201_CREATED
+        )

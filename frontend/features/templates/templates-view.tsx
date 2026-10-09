@@ -1,9 +1,11 @@
 "use client";
 
-import { FileTextIcon, RefreshCwIcon } from "lucide-react";
+import { FileTextIcon, PlusIcon, RefreshCwIcon, XIcon } from "lucide-react";
 import { useMemo, useState } from "react";
 
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { NativeSelect } from "@/components/ui/native-select";
 import { DetailList, PageHeader, Panel, SearchInput, Toolbar } from "@/components/ui/page";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
@@ -12,14 +14,17 @@ import { EmptyState, ErrorState, TableSkeleton } from "@/components/ui/states";
 import { StatusBadge, toneFor } from "@/components/ui/status-badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useToast } from "@/components/ui/toast";
+import { useAction } from "@/hooks/use-action";
 import { useApiQuery } from "@/hooks/use-api-query";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { presetRange } from "@/lib/analytics";
+import { cn } from "@/lib/utils";
 import { toApiError } from "@/lib/format";
 import { analyticsService } from "@/services/analytics";
-import { templateService } from "@/services/templates";
+import { type CreateTemplateInput, templateService } from "@/services/templates";
 import { whatsappService } from "@/services/whatsapp";
 import { useSession } from "@/stores/session-context";
+import type { BusinessAccount } from "@/types/api";
 
 function when(value: string | null): string {
   return value ? new Date(value).toLocaleString([], { dateStyle: "medium", timeStyle: "short" }) : "Never";
@@ -38,6 +43,7 @@ export function TemplatesView() {
   const [status, setStatus] = useState("");
   const [category, setCategory] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [creating, setCreating] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const enabled = Boolean(business);
   const range = presetRange("30d", business?.timezone || undefined);
@@ -108,6 +114,11 @@ export function TemplatesView() {
               >
                 Sync from Meta
               </LoadingButton>
+            ) : null}
+            {hasPermission("templates.manage") ? (
+              <Button size="sm" disabled={Boolean(noAccounts)} onClick={() => setCreating(true)}>
+                <PlusIcon aria-hidden /> New template
+              </Button>
             ) : null}
           </>
         }
@@ -251,7 +262,235 @@ export function TemplatesView() {
           {selectedId ? <TemplateDrawer id={selectedId} /> : null}
         </SheetContent>
       </Sheet>
+
+      <Sheet open={creating} onOpenChange={setCreating}>
+        <SheetContent className="w-full overflow-y-auto sm:max-w-lg">
+          <SheetHeader className="border-b">
+            <SheetTitle>New template</SheetTitle>
+            <SheetDescription>
+              Submitted to Meta for review — status starts PENDING until Meta approves or rejects it.
+            </SheetDescription>
+          </SheetHeader>
+          <div className="px-4 pb-8">
+            <TemplateCreateForm
+              accounts={accounts.data?.results ?? []}
+              onCancel={() => setCreating(false)}
+              onCreated={() => {
+                setCreating(false);
+                templates.reload();
+              }}
+            />
+          </div>
+        </SheetContent>
+      </Sheet>
     </div>
+  );
+}
+
+function TemplateCreateForm({
+  accounts,
+  onCancel,
+  onCreated,
+}: {
+  accounts: BusinessAccount[];
+  onCancel: () => void;
+  onCreated: () => void;
+}) {
+  const toast = useToast();
+  const { run, error, busy } = useAction(onCreated);
+  const [businessAccountId, setBusinessAccountId] = useState(accounts[0]?.id ?? "");
+  const [name, setName] = useState("");
+  const [language, setLanguage] = useState("en_US");
+  const [category, setCategory] = useState<CreateTemplateInput["category"]>("UTILITY");
+  const [hasHeader, setHasHeader] = useState(false);
+  const [headerText, setHeaderText] = useState("");
+  const [bodyText, setBodyText] = useState("");
+  const [footerText, setFooterText] = useState("");
+  const [buttons, setButtons] = useState<string[]>([]);
+
+  function buildComponents(): Record<string, unknown>[] {
+    const components: Record<string, unknown>[] = [];
+    if (hasHeader && headerText.trim()) {
+      components.push({ type: "HEADER", format: "TEXT", text: headerText.trim() });
+    }
+    components.push({ type: "BODY", text: bodyText.trim() });
+    if (footerText.trim()) {
+      components.push({ type: "FOOTER", text: footerText.trim() });
+    }
+    const nonEmptyButtons = buttons.map((b) => b.trim()).filter(Boolean);
+    if (nonEmptyButtons.length) {
+      components.push({
+        type: "BUTTONS",
+        buttons: nonEmptyButtons.map((text) => ({ type: "QUICK_REPLY", text })),
+      });
+    }
+    return components;
+  }
+
+  async function submit() {
+    const ok = await run(() =>
+      templateService.create({
+        business_account_id: businessAccountId,
+        name: name.trim(),
+        language,
+        category,
+        components: buildComponents(),
+      }),
+    );
+    if (ok) toast.success("Template submitted", "Meta will review it — check back for the status.");
+  }
+
+  const valid = businessAccountId && /^[a-z0-9_]+$/.test(name) && bodyText.trim().length > 0;
+
+  return (
+    <form
+      className="flex flex-col gap-4"
+      onSubmit={(e) => {
+        e.preventDefault();
+        void submit();
+      }}
+    >
+      {error ? (
+        <p className="border-destructive/25 bg-danger-soft rounded-md border px-3 py-2 text-sm">
+          {error.message}
+        </p>
+      ) : null}
+      <div className="flex flex-col gap-1.5">
+        <Label htmlFor="tpl-account">WhatsApp Business Account</Label>
+        <NativeSelect
+          id="tpl-account"
+          value={businessAccountId}
+          onChange={(e) => setBusinessAccountId(e.target.value)}
+        >
+          {accounts.map((a) => (
+            <option key={a.id} value={a.id}>
+              {a.name || a.external_id}
+            </option>
+          ))}
+        </NativeSelect>
+      </div>
+      <div className="flex flex-wrap gap-2">
+        <div className="flex min-w-48 flex-1 flex-col gap-1.5">
+          <Label htmlFor="tpl-name">Name</Label>
+          <Input
+            id="tpl-name"
+            required
+            placeholder="order_confirmation"
+            value={name}
+            onChange={(e) => setName(e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, "_"))}
+          />
+        </div>
+        <div className="flex w-28 flex-col gap-1.5">
+          <Label htmlFor="tpl-language">Language</Label>
+          <Input
+            id="tpl-language"
+            required
+            placeholder="en_US"
+            value={language}
+            onChange={(e) => setLanguage(e.target.value)}
+          />
+        </div>
+        <div className="flex w-36 flex-col gap-1.5">
+          <Label htmlFor="tpl-category">Category</Label>
+          <NativeSelect
+            id="tpl-category"
+            value={category}
+            onChange={(e) => setCategory(e.target.value as CreateTemplateInput["category"])}
+          >
+            {["MARKETING", "UTILITY", "AUTHENTICATION"].map((c) => (
+              <option key={c} value={c}>
+                {c.toLowerCase()}
+              </option>
+            ))}
+          </NativeSelect>
+        </div>
+      </div>
+
+      <div className="flex flex-col gap-2 rounded-md border p-3">
+        <label className="flex items-center gap-2 text-sm font-medium">
+          <input type="checkbox" checked={hasHeader} onChange={(e) => setHasHeader(e.target.checked)} />
+          Header (optional)
+        </label>
+        {hasHeader ? (
+          <Input
+            placeholder="Header text"
+            value={headerText}
+            onChange={(e) => setHeaderText(e.target.value)}
+          />
+        ) : null}
+      </div>
+
+      <div className="flex flex-col gap-1.5">
+        <Label htmlFor="tpl-body">
+          Body — use {"{{1}}"}, {"{{2}}"}, … for variables
+        </Label>
+        <textarea
+          id="tpl-body"
+          required
+          rows={5}
+          placeholder={"Hi {{1}}, your order #{{2}} has shipped."}
+          value={bodyText}
+          onChange={(e) => setBodyText(e.target.value)}
+          className={cn(
+            "min-h-24 w-full rounded-lg border border-input bg-transparent px-2.5 py-1.5 text-sm transition-colors outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 dark:bg-input/30",
+          )}
+        />
+      </div>
+
+      <div className="flex flex-col gap-1.5">
+        <Label htmlFor="tpl-footer">Footer (optional)</Label>
+        <Input
+          id="tpl-footer"
+          placeholder="Reply STOP to unsubscribe"
+          value={footerText}
+          onChange={(e) => setFooterText(e.target.value)}
+        />
+      </div>
+
+      <div className="flex flex-col gap-2">
+        <Label>Quick-reply buttons (optional)</Label>
+        {buttons.map((b, i) => (
+          <div key={i} className="flex gap-2">
+            <Input
+              value={b}
+              placeholder="Button text"
+              onChange={(e) =>
+                setButtons((prev) => prev.map((v, idx) => (idx === i ? e.target.value : v)))
+              }
+            />
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              aria-label="Remove button"
+              onClick={() => setButtons((prev) => prev.filter((_, idx) => idx !== i))}
+            >
+              <XIcon aria-hidden />
+            </Button>
+          </div>
+        ))}
+        {buttons.length < 3 ? (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="self-start"
+            onClick={() => setButtons((prev) => [...prev, ""])}
+          >
+            <PlusIcon aria-hidden /> Add button
+          </Button>
+        ) : null}
+      </div>
+
+      <div className="flex gap-2">
+        <LoadingButton type="submit" loading={busy} disabled={!valid}>
+          Submit for review
+        </LoadingButton>
+        <Button type="button" variant="ghost" onClick={onCancel}>
+          Cancel
+        </Button>
+      </div>
+    </form>
   );
 }
 

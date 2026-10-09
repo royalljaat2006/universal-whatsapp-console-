@@ -1,18 +1,23 @@
-"""Template synchronisation and status tracking."""
+"""Template synchronisation, creation and status tracking."""
 
 import hashlib
 import json
 import logging
 from datetime import datetime
+from typing import Any
 
 from django.db import transaction
 from django.db.models import Max
 from django.utils import timezone
 
+from apps.audit import actions
+from apps.audit.services import record as audit
 from apps.templates.models import MessageTemplate, MessageTemplateVersion
 from apps.whatsapp.models import WhatsAppBusinessAccount
 from apps.whatsapp.services import account_ref, provider_for
-from providers.whatsapp.types import TemplateInfo, TemplateStatusEvent
+from core.exceptions import TemplateCreateError
+from providers.whatsapp.errors import ProviderError
+from providers.whatsapp.types import TemplateInfo, TemplateSpec, TemplateStatusEvent
 
 logger = logging.getLogger(__name__)
 
@@ -61,6 +66,42 @@ def upsert_template(account: WhatsAppBusinessAccount, info: TemplateInfo) -> Mes
     template.last_synced_at = timezone.now()
     template.save()
     _snapshot(template)
+    return template
+
+
+def create_template(
+    account: WhatsAppBusinessAccount,
+    *,
+    name: str,
+    language: str,
+    category: str,
+    components: list[dict[str, Any]],
+    parameter_format: str | None = None,
+    actor: Any = None,
+) -> MessageTemplate:
+    """Submit a new template to Meta for review and store the result
+    (status PENDING until Meta's review webhook or the next sync updates
+    it). Meta owns validation — a rejected name/components combination
+    surfaces as ``TemplateCreateError`` with Meta's own reason."""
+    spec = TemplateSpec(
+        name=name,
+        language=language,
+        category=category,
+        components=components,
+        parameter_format=parameter_format,
+    )
+    try:
+        info = provider_for(account).create_template(account_ref(account), spec)
+    except ProviderError as exc:
+        raise TemplateCreateError(exc.message, details={"provider_code": exc.provider_code}) from exc
+    template = upsert_template(account, info)
+    audit(
+        actions.TEMPLATE_CREATED,
+        organization=account.organization,
+        actor=actor,
+        resource=template,
+        metadata={"name": name, "language": language, "category": category},
+    )
     return template
 
 

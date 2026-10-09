@@ -68,6 +68,16 @@ class EmbeddedSignupError(DomainError):
     default_message = "Could not complete WhatsApp Embedded Signup."
 
 
+class TemplateCreateError(DomainError):
+    """Meta rejected the template (policy violation, duplicate name, invalid
+    components, ...). The provider's own reason is passed through verbatim
+    in ``details`` so the user can fix the actual problem."""
+
+    code = "TEMPLATE_CREATE_FAILED"
+    status_code = status.HTTP_502_BAD_GATEWAY
+    default_message = "Meta rejected the template."
+
+
 def error_body(code: str, message: str, details: dict[str, Any] | None = None) -> dict[str, Any]:
     return {
         "error": {
