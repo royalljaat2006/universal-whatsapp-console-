@@ -26,6 +26,44 @@ import { whatsappService } from "@/services/whatsapp";
 import { useSession } from "@/stores/session-context";
 import type { BusinessAccount } from "@/types/api";
 
+// Meta's supported template languages (WhatsApp Business Platform docs),
+// trimmed to the common set rather than the full ~70-locale list.
+const TEMPLATE_LANGUAGES: [code: string, label: string][] = [
+  ["en_US", "English (US)"],
+  ["en_GB", "English (UK)"],
+  ["en", "English"],
+  ["hi", "Hindi"],
+  ["bn", "Bengali"],
+  ["ta", "Tamil"],
+  ["te", "Telugu"],
+  ["mr", "Marathi"],
+  ["gu", "Gujarati"],
+  ["kn", "Kannada"],
+  ["ml", "Malayalam"],
+  ["pa", "Punjabi"],
+  ["ur", "Urdu"],
+  ["es", "Spanish"],
+  ["es_MX", "Spanish (Mexico)"],
+  ["pt_BR", "Portuguese (Brazil)"],
+  ["pt_PT", "Portuguese (Portugal)"],
+  ["fr", "French"],
+  ["de", "German"],
+  ["it", "Italian"],
+  ["nl", "Dutch"],
+  ["ru", "Russian"],
+  ["tr", "Turkish"],
+  ["ar", "Arabic"],
+  ["id", "Indonesian"],
+  ["vi", "Vietnamese"],
+  ["th", "Thai"],
+  ["fil", "Filipino"],
+  ["zh_CN", "Chinese (Simplified)"],
+  ["zh_HK", "Chinese (Hong Kong)"],
+  ["zh_TW", "Chinese (Traditional)"],
+  ["ja", "Japanese"],
+  ["ko", "Korean"],
+];
+
 function when(value: string | null): string {
   return value ? new Date(value).toLocaleString([], { dateStyle: "medium", timeStyle: "short" }) : "Never";
 }
@@ -382,13 +420,13 @@ function TemplateCreateForm({
         </div>
         <div className="flex w-28 flex-col gap-1.5">
           <Label htmlFor="tpl-language">Language</Label>
-          <Input
-            id="tpl-language"
-            required
-            placeholder="en_US"
-            value={language}
-            onChange={(e) => setLanguage(e.target.value)}
-          />
+          <NativeSelect id="tpl-language" value={language} onChange={(e) => setLanguage(e.target.value)}>
+            {TEMPLATE_LANGUAGES.map(([code, label]) => (
+              <option key={code} value={code}>
+                {label}
+              </option>
+            ))}
+          </NativeSelect>
         </div>
         <div className="flex w-36 flex-col gap-1.5">
           <Label htmlFor="tpl-category">Category</Label>
