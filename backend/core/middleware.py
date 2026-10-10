@@ -118,6 +118,21 @@ def set_rls_organization(organization_id: object) -> None:
         cursor.execute("SELECT set_config('app.current_org_id', %s, true)", [str(organization_id)])
 
 
+def reset_rls_context_if_nested() -> None:
+    """``SET LOCAL`` lasts until the end of the OUTERMOST transaction. In
+    production the middleware's ``atomic()`` is outermost, so the role and
+    tenant variable revert on exit by themselves. When something already holds
+    a transaction open (pytest-django's per-test transaction, ATOMIC_REQUESTS)
+    the ``atomic()`` is only a savepoint, so the restricted role would leak
+    into whatever runs next on that connection. Reset explicitly in that case
+    only; a no-op otherwise."""
+    if connection.vendor != "postgresql" or not connection.in_atomic_block:
+        return
+    with connection.cursor() as cursor:
+        cursor.execute("RESET ROLE")
+        cursor.execute("SELECT set_config('app.current_org_id', '', true)")
+
+
 class RowLevelSecurityMiddleware:
     """Wraps tenant API requests (``/api/v1/...``) in one transaction so
     OrganizationScopedMixin can SET LOCAL the restricted role and tenant
@@ -145,5 +160,8 @@ class RowLevelSecurityMiddleware:
     def __call__(self, request: HttpRequest) -> HttpResponse:
         if not request.path.startswith(self.TENANT_API_PREFIX):
             return self.get_response(request)
-        with transaction.atomic():
-            return self.get_response(request)
+        try:
+            with transaction.atomic():
+                return self.get_response(request)
+        finally:
+            reset_rls_context_if_nested()

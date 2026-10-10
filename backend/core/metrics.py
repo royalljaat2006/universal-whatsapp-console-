@@ -11,6 +11,7 @@ Request-latency instrumentation lives in core.middleware.AccessLogMiddleware
 (it already times every request for the structured log line) rather than a
 second middleware duplicating that timing."""
 
+import logging
 from django.db.models import Count
 
 from prometheus_client import CollectorRegistry, Gauge, Histogram
@@ -55,6 +56,30 @@ MESSAGES_FAILED_BY_ERROR_CODE = Gauge(
     "messages_failed_by_error_code",
     "Current count of failed outbound messages in the last 24h, by error code.",
     ["error_code"],
+    registry=REGISTRY,
+)
+
+BACKUP_LAST_SUCCESS_AGE_SECONDS = Gauge(
+    "backup_last_success_age_seconds",
+    "Seconds since the last successful database backup (see core.BackupRecord).",
+    registry=REGISTRY,
+)
+
+BACKUP_LAST_STATUS = Gauge(
+    "backup_last_status",
+    "1 if the most recent backup attempt succeeded, else 0.",
+    registry=REGISTRY,
+)
+
+BACKUP_LAST_SIZE_BYTES = Gauge(
+    "backup_last_size_bytes",
+    "Size of the most recent successful backup file.",
+    registry=REGISTRY,
+)
+
+BACKUP_DISK_FREE_RATIO = Gauge(
+    "backup_disk_free_ratio",
+    "Free space ratio (0-1) on the backup volume, as reported by the most recent attempt.",
     registry=REGISTRY,
 )
 
@@ -115,3 +140,46 @@ def refresh_gauges() -> None:
             CELERY_QUEUE_DEPTH.labels(queue=queue).set(client.llen(queue))
     except Exception:
         pass
+
+    try:
+        refresh_backup_gauges()
+    except Exception:
+        # Still must not break the scrape, but a silent failure here would
+        # leave stale backup gauges (and hide a missing backup) unnoticed.
+        logging.getLogger(__name__).exception("could not refresh backup gauges")
+
+
+def refresh_backup_gauges() -> None:
+    """Backup gauges from core.BackupRecord (written by the backup service).
+
+    A prometheus_client Gauge exports 0 until set, which would make "no
+    successful backup, ever" look like "a backup just succeeded" (age 0). So
+    the cases with nothing to report are explicit: age +Inf (trips
+    BackupMissing) and status NaN (so BackupFailed's ``== 0`` stays quiet when
+    there is simply no attempt on record yet, rather than reporting a false
+    failure)."""
+    from django.utils import timezone
+
+    from core.models import BackupRecord
+
+    last = BackupRecord.objects.order_by("-started_at").first()
+    # NaN (not the Gauge default 0) when unknown, so "< 0.15" and "== 0"
+    # alert expressions don't fire on missing data.
+    BACKUP_LAST_STATUS.set(float("nan"))
+    BACKUP_DISK_FREE_RATIO.set(float("nan"))
+    if last is not None:
+        BACKUP_LAST_STATUS.set(1 if last.status == BackupRecord.Status.SUCCEEDED else 0)
+        if last.disk_free_bytes is not None and last.disk_total_bytes:
+            BACKUP_DISK_FREE_RATIO.set(last.disk_free_bytes / last.disk_total_bytes)
+
+    last_ok = (
+        BackupRecord.objects.filter(status=BackupRecord.Status.SUCCEEDED)
+        .order_by("-started_at")
+        .first()
+    )
+    if last_ok is None:
+        BACKUP_LAST_SUCCESS_AGE_SECONDS.set(float("inf"))
+    else:
+        BACKUP_LAST_SUCCESS_AGE_SECONDS.set((timezone.now() - last_ok.started_at).total_seconds())
+        if last_ok.file_size_bytes:
+            BACKUP_LAST_SIZE_BYTES.set(last_ok.file_size_bytes)

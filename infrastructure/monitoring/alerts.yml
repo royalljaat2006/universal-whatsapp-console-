@@ -76,3 +76,42 @@ groups:
         annotations:
           summary: "Over 5% of requests are returning 5xx"
           description: "Sustained server error rate across the API."
+
+      - alert: BackupFailed
+        expr: backup_last_status == 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "The most recent database backup attempt failed"
+          description: >-
+            Check `docker compose logs backup` and the core_backuprecord
+            table (or GET /api/v1/platform/backups/) for the error.
+
+      - alert: BackupMissing
+        expr: >-
+          absent(backup_last_success_age_seconds)
+          or backup_last_success_age_seconds > 2 * 86400
+        for: 10m
+        labels:
+          severity: critical
+        annotations:
+          summary: "No successful backup in over 2 days"
+          description: >-
+            Either the backup service is down/misconfigured, or every
+            recent attempt has failed. This is more urgent than a single
+            BackupFailed firing, since it means there is no recent recovery
+            point at all.
+
+      - alert: BackupDiskSpaceLow
+        expr: backup_disk_free_ratio < 0.15
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Backup volume has less than 15% free space"
+          description: >-
+            The next few backups may fail outright once the volume fills.
+            Either free space or shorten retention
+            (BACKUP_DAILY_RETENTION_DAYS / _WEEKLY_RETENTION_WEEKS /
+            _MONTHLY_RETENTION_MONTHS).

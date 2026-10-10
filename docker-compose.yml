@@ -38,11 +38,15 @@ services:
       retries: 20
     restart: unless-stopped
 
-  # Periodic pg_dump -> gzip into a private volume, with retention pruning.
+  # Periodic pg_dump (custom format, verified with pg_restore --list,
+  # optionally encrypted at rest) into a private volume, with tiered
+  # daily/weekly/monthly retention. Status of every attempt is recorded in
+  # core_backuprecord (see /api/v1/platform/backups/ and /metrics).
   # See docs/deployment.md#backups for the restore procedure (verified with
   # a real restore test, not assumed).
   backup:
-    image: postgres:17-alpine
+    build:
+      context: ./infrastructure/docker/backup
     depends_on:
       postgres:
         condition: service_healthy
@@ -51,12 +55,25 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-whatsapp_platform}
       POSTGRES_DB: ${POSTGRES_DB:-whatsapp_platform}
       PGPASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
-      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-7}
       BACKUP_INTERVAL_SECONDS: ${BACKUP_INTERVAL_SECONDS:-86400}
+      BACKUP_DAILY_RETENTION_DAYS: ${BACKUP_DAILY_RETENTION_DAYS:-7}
+      BACKUP_WEEKLY_RETENTION_WEEKS: ${BACKUP_WEEKLY_RETENTION_WEEKS:-4}
+      BACKUP_MONTHLY_RETENTION_MONTHS: ${BACKUP_MONTHLY_RETENTION_MONTHS:-6}
+      # Passphrase for at-rest encryption (openssl aes-256-cbc). Left unset
+      # in local dev on purpose — never invented; see .env.example. Backups
+      # run unencrypted (with a loud warning) until this is set.
+      BACKUP_ENCRYPTION_KEY: ${BACKUP_ENCRYPTION_KEY:-}
+      BACKUP_RETRY_ATTEMPTS: ${BACKUP_RETRY_ATTEMPTS:-3}
+      BACKUP_RETRY_DELAY_SECONDS: ${BACKUP_RETRY_DELAY_SECONDS:-60}
     volumes:
       - postgres-backups:/backups
-      - ./infrastructure/docker/backup/entrypoint.sh:/entrypoint.sh:ro
-    entrypoint: ["sh", "/entrypoint.sh"]
+    healthcheck:
+      # Healthy while a backup succeeded within 2 intervals + 1h.
+      test: ["CMD", "/healthcheck.sh"]
+      interval: 5m
+      timeout: 10s
+      retries: 1
+      start_period: 10m
     restart: unless-stopped
 
   redis:

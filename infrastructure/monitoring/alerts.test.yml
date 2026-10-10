@@ -1,0 +1,69 @@
+# promtool test rules alerts.test.yml   (backup alert semantics)
+rule_files:
+  - alerts.yml
+evaluation_interval: 1m
+
+tests:
+  - interval: 1m
+    name: never-succeeded (age=+Inf, status=NaN) fires BackupMissing only
+    input_series:
+      - series: backup_last_success_age_seconds
+        values: "inf+0x30"
+      - series: backup_last_status
+        values: "NaN+0x30"
+      - series: backup_disk_free_ratio
+        values: "NaN+0x30"
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: BackupMissing
+        exp_alerts:
+          - exp_labels: {severity: critical}
+            exp_annotations:
+              summary: "No successful backup in over 2 days"
+              description: "Either the backup service is down/misconfigured, or every recent attempt has failed. This is more urgent than a single BackupFailed firing, since it means there is no recent recovery point at all."
+      - eval_time: 20m
+        alertname: BackupFailed
+        exp_alerts: []
+      - eval_time: 20m
+        alertname: BackupDiskSpaceLow
+        exp_alerts: []
+
+  - interval: 1m
+    name: healthy backup fires nothing
+    input_series:
+      - series: backup_last_success_age_seconds
+        values: "3600+0x30"
+      - series: backup_last_status
+        values: "1+0x30"
+      - series: backup_disk_free_ratio
+        values: "0.6+0x30"
+    alert_rule_test:
+      - {eval_time: 20m, alertname: BackupMissing, exp_alerts: []}
+      - {eval_time: 20m, alertname: BackupFailed, exp_alerts: []}
+      - {eval_time: 20m, alertname: BackupDiskSpaceLow, exp_alerts: []}
+
+  - interval: 1m
+    name: latest attempt failed fires BackupFailed, low disk fires warning
+    input_series:
+      - series: backup_last_success_age_seconds
+        values: "7200+0x30"
+      - series: backup_last_status
+        values: "0+0x30"
+      - series: backup_disk_free_ratio
+        values: "0.05+0x30"
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: BackupFailed
+        exp_alerts:
+          - exp_labels: {severity: critical}
+            exp_annotations:
+              summary: "The most recent database backup attempt failed"
+              description: "Check `docker compose logs backup` and the core_backuprecord table (or GET /api/v1/platform/backups/) for the error."
+      - eval_time: 20m
+        alertname: BackupDiskSpaceLow
+        exp_alerts:
+          - exp_labels: {severity: warning}
+            exp_annotations:
+              summary: "Backup volume has less than 15% free space"
+              description: "The next few backups may fail outright once the volume fills. Either free space or shorten retention (BACKUP_DAILY_RETENTION_DAYS / _WEEKLY_RETENTION_WEEKS / _MONTHLY_RETENTION_MONTHS)."
+      - {eval_time: 20m, alertname: BackupMissing, exp_alerts: []}

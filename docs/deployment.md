@@ -100,52 +100,135 @@ recovery instead of the mechanism below; don't run both against the same
 database.
 
 **Self-hosted PostgreSQL** (docker-compose, including local development):
-the `backup` service (`docker-compose.yml`) runs `pg_dump` on a schedule
-(`BACKUP_INTERVAL_SECONDS`, default 86400 = daily) into the `postgres-backups`
-volume, gzip-compressed and timestamped
-(`<db>-<UTC timestamp>.sql.gz`), pruning anything older than
-`BACKUP_RETENTION_DAYS` (default 7) after every run. It runs once immediately
-on startup, then on the configured interval — so restarting the stack always
-produces a fresh backup, not just a wait for the next scheduled tick. Logs
-each attempt (success with file size, or failure without touching prior
-backups) to its own container's stdout (`docker compose logs backup`).
+the `backup` service (`infrastructure/docker/backup/`) runs `pg_dump
+--format=custom` on a schedule (`BACKUP_INTERVAL_SECONDS`, default 86400 =
+daily) into the `postgres-backups` volume, named
+`<db>-<UTC timestamp>.dump` (or `.dump.enc` when encrypted), each with a
+`.sha256` sidecar. It waits for the database (and the `core_backuprecord`
+table) to exist, backs up once immediately on startup, then on the
+configured interval. A failed attempt is retried
+(`BACKUP_RETRY_ATTEMPTS`, default 3, `BACKUP_RETRY_DELAY_SECONDS`, default 60)
+before the service waits for the next interval; this covers the common case
+of the database still starting after a host or Docker restart. `pg_dump` uses
+its own consistent MVCC snapshot and never blocks application writes.
+
+**What gets recorded.** Every attempt, success or failure, is a row in
+`core_backuprecord` (status, timestamps, file, size, sha256, encrypted flag,
+the real error text on failure, and free/total space of the backup volume):
+`GET /api/v1/platform/backups/` (staff only), or the gauges on `/metrics`:
+`backup_last_status` (1/0), `backup_last_success_age_seconds`,
+`backup_last_size_bytes`, `backup_disk_free_ratio`. When there is nothing to
+report the gauges are explicit: age is `+Inf` if no backup has ever succeeded
+(so `BackupMissing` fires) and status / disk ratio are `NaN` (so
+`BackupFailed` / `BackupDiskSpaceLow` do not fire on missing data).
+`infrastructure/monitoring/alerts.yml` defines `BackupFailed`, `BackupMissing`
+and `BackupDiskSpaceLow`; their behaviour is covered by
+`infrastructure/monitoring/alerts.test.yml` (`promtool test rules`). The
+container also has a Docker healthcheck that turns unhealthy if no backup has
+succeeded within 2 intervals + 1 hour.
+
+**Per-backup checks, before a file is accepted:** free space is at least 2x
+the previous backup (plaintext and ciphertext coexist briefly); the fresh dump
+passes `pg_restore --list`; when encrypting, the ciphertext is decrypted again
+and its checksum must equal the dump's checksum. Encrypted output is written
+to a temporary name and renamed only when verified, so a crash can never leave
+a partial file that retention or restore would treat as a backup. Failed
+attempts leave earlier backups untouched.
+
+**Encryption at rest.** Set `BACKUP_ENCRYPTION_KEY` (see `.env.example`) and
+backups are encrypted with `openssl enc -aes-256-cbc -pbkdf2`. The plaintext
+dump exists on the volume only transiently (mode 600, inside a mode 700
+directory) while it is being verified and encrypted, and is removed on every
+exit path. Leaving the key unset is supported but logs a warning on every run;
+do not do it with real customer data. Store the key in a password manager as
+well as `.env`: losing it makes every encrypted backup unrecoverable, by
+design. Note that `openssl enc` CBC provides confidentiality but not
+authentication; integrity is provided by the sha256 sidecar (accidental
+corruption) and `pg_restore --list`, not by a MAC, so keep the volume
+write-protected from untrusted parties.
+
+**Permissions.** Backup directory `chmod 700`, backup files `chmod 600`
+(`umask 077` for the whole service).
+
+**Retention** (GFS, configurable): every backup from the last
+`BACKUP_DAILY_RETENTION_DAYS` (default 7) is kept; beyond that, the newest
+backup in each rolling 7-day bucket for `BACKUP_WEEKLY_RETENTION_WEEKS`
+(default 4); beyond that, the newest per calendar month for
+`BACKUP_MONTHLY_RETENTION_MONTHS` (default 6); older ones are removed together
+with their sidecar. The newest backup is never removed, however the settings
+are chosen. Non-integer settings stop the service at startup instead of
+silently changing what is deleted. To see what a pass would delete without
+deleting anything:
+
+```
+docker compose exec -e BACKUP_PRUNE_DRY_RUN=true backup /entrypoint.sh prune
+```
 
 ### Restore procedure
 
-1. Identify the dump to restore: `docker compose exec backup ls -la /backups`.
-2. **Never restore directly into the live database first.** Create a scratch
-   database on the same instance and restore into that:
-   ```
-   docker compose exec -e PGPASSWORD=<POSTGRES_PASSWORD> postgres \
-     psql -U <POSTGRES_USER> -d postgres -c "CREATE DATABASE restore_check;"
-   docker compose exec -e PGPASSWORD=<POSTGRES_PASSWORD> backup sh -c \
-     "gunzip -c /backups/<file>.sql.gz | psql -h postgres -U <POSTGRES_USER> -d restore_check -q"
-   ```
-3. Verify integrity before trusting it — compare row counts (and ideally a
-   content checksum) against the live database for a few core tables:
-   ```
-   psql -U <POSTGRES_USER> -d <db> -t -c \
-     "SELECT 'identity_user', count(*) FROM identity_user;"
-   ```
-   repeated against `restore_check`; counts (and a
-   `md5(string_agg(...))`-style checksum of a real column) must match.
-4. Drop the scratch database once satisfied:
-   `DROP DATABASE restore_check;`.
-5. Only once step 3 has passed for the specific backup you intend to use,
-   restore into a real target: stop application traffic (readiness check
-   returning 503 is fine — do not stop before then), then
-   `gunzip -c <file>.sql.gz | psql -h <host> -U <user> -d <target-db>`,
-   confirm with `manage.py check` and `/health/ready`, then resume traffic.
+The restore tool is `/restore.sh` inside the `backup` image. It checks the
+sha256 sidecar, decrypts into a private temp file (removed on exit), verifies
+the archive, and recreates the cluster-level RLS role `whatsapp_platform_app`
+if missing (it lives outside any single database dump; restoring without it
+leaves the app role with `permission denied` on every tenant table, which was
+reproduced with the previous `--no-privileges` approach). Table privileges are
+restored from the dump.
 
-**Verified 2026-09-26** (local development stack, not production): ran the
-full cycle above — a real `pg_dump` produced by the `backup` service,
-restored into a scratch database, row counts for `identity_user`,
-`organizations_organization`, `contacts_contact` and `audit_auditlog` matched
-exactly, and an md5 checksum of every user's email (sorted) was
-byte-identical between the live and restored databases. This proves the
-mechanism works; it is not a substitute for periodically re-running the same
-restore test against production's actual backup source (managed PITR or
-this same `pg_dump` mechanism, whichever is in use there).
+A dump can also reference its original *owner* role (for example in
+`ALTER DEFAULT PRIVILEGES FOR ROLE <owner>`), which aborts a restore onto a
+server where that role does not exist (new cluster, managed Postgres, a
+different `POSTGRES_USER`). `restore.sh` therefore creates any role the dump
+references as a `NOLOGIN` placeholder, and re-applies the app role's grants and
+default privileges for the role that is restoring, so tables created by future
+migrations stay reachable. Found by restoring a real backup onto a server with
+a different owner name; covered in the verification below.
+
+**Verify a backup, never touching the real database:**
+```
+docker compose exec backup /restore.sh <file.dump|file.dump.enc>
+```
+Restores into a throwaway `restore_check_<timestamp>` database, then checks
+that migrations are present, RLS policies exist, the app role can query tenant
+tables and sees **no rows** without a tenant context (fail-closed), and prints
+live-vs-restored row counts (informational, since live data changes after the
+backup). Exits non-zero on any `[FAIL]`. The scratch database is dropped.
+
+**Restore into a named database** (requires the target name AND
+`CONFIRM_PRODUCTION_RESTORE=yes`):
+```
+docker compose exec -e CONFIRM_PRODUCTION_RESTORE=yes backup \
+  /restore.sh <file.dump.enc> <target-db-name>
+```
+The backup is restored into a staging database and checked first; then the
+databases are swapped by rename. The previous database is **kept** as
+`<target>_pre_restore_<timestamp>` (drop it yourself once you are satisfied),
+so a failed or mistaken restore never destroys the data it was meant to
+replace. Stop application traffic first: the rename fails safely (nothing is
+changed) if any session is still connected. Afterwards:
+`docker compose restart backend worker beat` and check `/health/ready`.
+
+**Verified 2026-10-10** (disposable Postgres 17 + the real migrations + seeded
+rows; not production): encrypted and unencrypted backups end to end, restore to
+a scratch database, restore onto an empty fresh cluster (role recreated), restore of a real development backup onto a server with a different owner role (86 migrations, 33 policies, matching row counts, per-tenant isolation checked across every RLS table), wrong
+key / missing key / corrupted file all rejected, retries and recorded failures
+for a permission error, an unreachable database and low disk, retention
+decisions compared against an independent implementation on 25 synthetic dated
+files, healthcheck, and the alert rules via `promtool`. This proves the
+mechanism; it is not a substitute for periodically restoring your actual
+production backups.
+
+### Known limitations
+
+- A restore runs as a shell command outside the Django application (by design;
+  it must work when the application is down), so it is not written to the
+  app's `AuditLog`. The backup container's logs and shell history are the
+  record.
+- `BACKUP_ENCRYPTION_KEY` has no rotation tooling: rotate by decrypting old
+  backups with the old key and re-encrypting with the new one.
+- Backups live on the same Docker host as the database unless you copy the
+  `postgres-backups` volume elsewhere. That is an off-host copy you must
+  arrange; the service does not do it.
+- `core_backuprecord` grows by one row per attempt and has no pruning.
 
 ## Deploying under a path prefix (shared gateway)
 
@@ -182,7 +265,7 @@ slash) wherever the stack is built and run:
 - Publish only nginx. Postgres and Redis stay on private networks (compose
   binds them to 127.0.0.1 in development).
 - Database backups verified by a restore test (see Backups above — done
-  against the local dev stack 2026-09-26; re-verify against whatever backup
+  against a disposable stack 2026-10-10; re-verify against whatever backup
   source production actually uses before go-live).
 - Error alerting on `webhook processing failed`, DEAD webhook events and
   failed sends (see `infrastructure/monitoring/README.md`).

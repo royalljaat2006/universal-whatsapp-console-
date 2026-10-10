@@ -12,6 +12,7 @@ urlpatterns = [
     path("audit-logs/", api.PlatformAuditLogListView.as_view(), name="platform-audit-logs"),
     path("operations/", api.OperationsSummaryView.as_view(), name="platform-operations"),
     path("failed-jobs/", api.PlatformFailedJobsView.as_view(), name="platform-failed-jobs"),
+    path("backups/", api.BackupHistoryView.as_view(), name="platform-backups"),
     path(
         "webhook-events/", api.PlatformWebhookEventListView.as_view(), name="platform-webhook-events"
     ),

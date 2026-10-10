@@ -47,6 +47,7 @@ from apps.webhooks.processor import mark_for_replay
 from apps.webhooks.tasks import process_webhook_event
 from core.exceptions import NotFoundError
 from core.health.checks import check_cache, check_celery_workers, check_database
+from core.models import BackupRecord
 
 
 class OrganizationDirectorySerializer(serializers.ModelSerializer):
@@ -363,3 +364,33 @@ class PlatformFailedJobsView(APIView):
                 ],
             }
         )
+
+
+class BackupRecordSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = BackupRecord
+        fields = [
+            "id",
+            "started_at",
+            "finished_at",
+            "status",
+            "file_path",
+            "file_size_bytes",
+            "sha256",
+            "encrypted",
+            "error_message",
+            "disk_free_bytes",
+            "disk_total_bytes",
+        ]
+        read_only_fields = fields
+
+
+class BackupHistoryView(generics.ListAPIView):
+    """Read-only backup history for platform admins (apps.core.BackupRecord,
+    written by infrastructure/docker/backup/entrypoint.sh). Never exposes
+    encryption keys or database credentials — those never touch this table
+    in the first place."""
+
+    permission_classes = [IsPlatformAdmin]
+    serializer_class = BackupRecordSerializer
+    queryset = BackupRecord.objects.order_by("-started_at")

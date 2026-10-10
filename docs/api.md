@@ -175,6 +175,11 @@ Workers stream rows from chunked iterators into object storage (`exports/…`).
 Cells beginning with `= + - @` are prefixed with `'` (CSV injection).
 Requests and downloads are audited.
 
+## Platform: backups
+
+`GET /api/v1/platform/backups/` (platform staff): history of database backup
+attempts (status, file, size, sha256, encrypted, error, disk space).
+
 ## Realtime events
 
 The server sends `{"event", "data", "emitted_at"}`, where `event` ∈
