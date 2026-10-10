@@ -25,7 +25,8 @@ const q = (filters: AnalyticsFilters, extra: Record<string, string | undefined> 
 
 /** Read-only analytics over backend rollups; business scope comes from the session header. */
 export const analyticsService = {
-  overview: (f: AnalyticsFilters) => api.get<AnalyticsOverview>("/api/v1/analytics/overview/", q(f)),
+  overview: (f: AnalyticsFilters, options: { businessId?: string } = {}) =>
+    api.get<AnalyticsOverview>("/api/v1/analytics/overview/", { ...q(f), ...options }),
   timeseries: (f: AnalyticsFilters, granularity?: "hour" | "day") =>
     api.get<AnalyticsTimeseries>("/api/v1/analytics/timeseries/", q(f, { granularity })),
   numbers: (f: AnalyticsFilters) =>

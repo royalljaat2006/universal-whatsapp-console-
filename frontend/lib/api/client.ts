@@ -52,6 +52,9 @@ export interface RequestOptions {
   unscoped?: boolean;
   /** Skip only X-Business-ID (organization-wide endpoints like the business list). */
   noBusiness?: boolean;
+  /** Read from a specific business instead of the active one (e.g. comparing
+   * businesses). The server still validates that the member may access it. */
+  businessId?: string;
   signal?: AbortSignal;
 }
 
@@ -73,7 +76,8 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
   }
   if (!options.unscoped && activeOrganizationId) {
     headers["X-Organization-ID"] = activeOrganizationId;
-    if (!options.noBusiness && activeBusinessId) headers["X-Business-ID"] = activeBusinessId;
+    const businessId = options.businessId ?? activeBusinessId;
+    if (!options.noBusiness && businessId) headers["X-Business-ID"] = businessId;
   }
 
   let response: Response;

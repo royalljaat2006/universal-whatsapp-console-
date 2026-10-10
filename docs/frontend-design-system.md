@@ -59,3 +59,30 @@ for).
   (`lib/realtime/client.ts#acquireRealtime`).
 - Icons: lucide only, `aria-hidden` when decorative; icon-only buttons carry
   `aria-label`.
+
+## Command home (`features/command/`)
+
+The home route (`/`) is intent-first: one command input, suggestions built from
+real business data (counts only appear when the API reports them), and the
+result rendered in place. The detailed pages are unchanged and one click away
+in the sidebar; the old overview is behind a "Business overview" disclosure
+(remembered per browser).
+
+- `parse.ts` is deterministic: explicit rules map text to a fixed intent set
+  (delivery performance, failed messages, costs incl. cross-business
+  comparison, running campaigns, templates needing attention, unread
+  conversations, search, navigate, launch/pause campaign). There is no model.
+  Imperative verbs it does not implement ("delete", "send", "create"...) are
+  refused as `unsupported` with the list of what does work, and a request that
+  is only a name becomes a search that says so.
+- `run.ts` calls the same typed services as the pages. Nothing is privileged:
+  tenant headers come from the API client, and the server's 403/404 is
+  final. Client-side permission checks only avoid pointless round trips and
+  give a clear message.
+- Consequential actions (launch, pause) never run from the command text. They
+  return a confirmation built from the server's own preview (recipients, rate,
+  failed checks); the write happens only on the explicit confirm click, uses the
+  existing audited endpoints, and a failed launch check disables confirmation.
+- Cross-business comparison reads each business with an explicit
+  `X-Business-ID` (`apiRequest({ businessId })`); the server still verifies the
+  member may access it.

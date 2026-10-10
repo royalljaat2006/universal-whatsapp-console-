@@ -25,5 +25,6 @@ test("a new owner can create a business from the onboarding checklist's link", a
   await page.getByLabel("New business name").fill(businessName);
   await page.getByRole("button", { name: "Create business" }).click();
 
-  await expect(page.getByText(businessName)).toBeVisible();
+  // The name legitimately appears in several places (switcher, header, list).
+  await expect(page.getByText(businessName).first()).toBeVisible();
 });

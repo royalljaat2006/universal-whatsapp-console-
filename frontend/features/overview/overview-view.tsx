@@ -44,7 +44,7 @@ function SeeAll({ href, label }: { href: string; label: string }) {
 }
 
 /** Business overview composed only of real backend reads. */
-export function OverviewView() {
+export function OverviewView({ hideOnboarding = false }: { hideOnboarding?: boolean }) {
   const { business, hasPermission, user } = useSession();
   const enabled = Boolean(business);
   const today = presetRange("today", business?.timezone || undefined);
@@ -76,12 +76,14 @@ export function OverviewView() {
 
   return (
     <div className="flex flex-col gap-6">
-      <PageHeader
-        title={business ? business.name : "Overview"}
-        description={`Welcome back${user?.full_name ? `, ${user.full_name.split(" ")[0]}` : ""}. Here is what is happening today.`}
-      />
+      {hideOnboarding ? null : (
+        <PageHeader
+          title={business ? business.name : "Overview"}
+          description={`Welcome back${user?.full_name ? `, ${user.full_name.split(" ")[0]}` : ""}. Here is what is happening today.`}
+        />
+      )}
 
-      <OnboardingChecklist numbers={numbers.data?.results} />
+      {hideOnboarding ? null : <OnboardingChecklist numbers={numbers.data?.results} />}
 
       {hasPermission("analytics.view") ? (
         <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
