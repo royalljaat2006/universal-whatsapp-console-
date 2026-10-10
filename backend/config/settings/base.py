@@ -77,6 +77,7 @@ MIDDLEWARE = [
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
+    "apps.identity.authentication.AdminMFAGuardMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
     "core.middleware.AccessLogMiddleware",
@@ -151,6 +152,13 @@ AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.CommonPasswordValidator"},
     {"NAME": "django.contrib.auth.password_validation.NumericPasswordValidator"},
 ]
+# Multi-factor authentication (apps.identity.mfa). Opt-in per user. This flag
+# additionally REQUIRES platform staff (is_staff) to have enrolled before they
+# can use /api/v1/platform/*; it is off by default so turning MFA on never
+# locks an existing operator out - enrol first, then enable (docs/security.md).
+MFA_REQUIRED_FOR_STAFF = env.bool("MFA_REQUIRED_FOR_STAFF", default=False)
+MFA_ISSUER = env.str("MFA_ISSUER", default="WhatsApp Console")
+
 SESSION_ENGINE = "django.contrib.sessions.backends.cached_db"
 SESSION_COOKIE_HTTPONLY = True
 SESSION_COOKIE_SAMESITE = "Lax"
@@ -188,7 +196,7 @@ FILE_UPLOAD_MAX_MEMORY_SIZE = 5 * 1024 * 1024
 # ---------------------------------------------------------------------------
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": [
-        "rest_framework.authentication.SessionAuthentication",
+        "apps.identity.authentication.MFASessionAuthentication",
         "apps.apikeys.authentication.ApiKeyAuthentication",
     ],
     "DEFAULT_PERMISSION_CLASSES": ["rest_framework.permissions.IsAuthenticated"],
@@ -279,6 +287,11 @@ WEBHOOK_UNMATCHED_STATUS_RETRY_SECONDS = env.int(
 MESSAGE_SENDING_STUCK_SECONDS = env.int("MESSAGE_SENDING_STUCK_SECONDS", default=600)
 
 # Campaigns (Build Cycle 3, docs/campaign-architecture.md)
+# Operational safeguards (core.limits): per-organization caps against runaway or
+# hostile volume. Generous defaults; 0 disables a guard. Not commercial limits.
+MAX_ACTIVE_API_KEYS_PER_ORG = env.int("MAX_ACTIVE_API_KEYS_PER_ORG", default=50)
+MAX_PENDING_INVITATIONS_PER_ORG = env.int("MAX_PENDING_INVITATIONS_PER_ORG", default=100)
+MAX_ACTIVE_EXPORTS_PER_ORG = env.int("MAX_ACTIVE_EXPORTS_PER_ORG", default=5)
 CAMPAIGN_MAX_RECIPIENTS = env.int("CAMPAIGN_MAX_RECIPIENTS", default=200_000)
 CAMPAIGN_DEFAULT_RATE_PER_MINUTE = env.int("CAMPAIGN_DEFAULT_RATE_PER_MINUTE", default=60)
 CAMPAIGN_MAX_RATE_PER_MINUTE = env.int("CAMPAIGN_MAX_RATE_PER_MINUTE", default=1200)

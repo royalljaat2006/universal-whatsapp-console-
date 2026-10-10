@@ -1,13 +1,37 @@
 import { api } from "@/lib/api/client";
-import type { User } from "@/types/api";
+import type { MfaChallenge, MfaEnrolment, MfaStatus, User } from "@/types/api";
 
 export const authService = {
   /** Ensures the CSRF cookie exists before the first unsafe request. */
   primeCsrf: () => api.get<void>("/api/v1/auth/csrf/", { unscoped: true }),
   login: async (email: string, password: string) => {
     await authService.primeCsrf();
-    return api.post<User>("/api/v1/auth/login/", { email, password }, { unscoped: true });
+    return api.post<User | MfaChallenge>(
+      "/api/v1/auth/login/",
+      { email, password },
+      { unscoped: true },
+    );
   },
+  /** Second sign-in step: exactly one of `code` (authenticator) or `recovery_code`. */
+  verifyMfa: async (input: { code: string } | { recovery_code: string }) => {
+    await authService.primeCsrf();
+    return api.post<User & { recovery_codes_remaining?: number }>(
+      "/api/v1/auth/mfa/verify/",
+      input,
+      { unscoped: true },
+    );
+  },
+  mfaStatus: () => api.get<MfaStatus>("/api/v1/auth/mfa/", { unscoped: true }),
+  mfaSetup: (password: string) =>
+    api.post<MfaEnrolment>("/api/v1/auth/mfa/setup/", { password }, { unscoped: true }),
+  mfaConfirm: (code: string) =>
+    api.post<{ recovery_codes: string[] }>("/api/v1/auth/mfa/confirm/", { code }, { unscoped: true }),
+  mfaDisable: (input: { password: string; code?: string; recovery_code?: string }) =>
+    api.post<void>("/api/v1/auth/mfa/disable/", input, { unscoped: true }),
+  mfaRegenerateRecoveryCodes: (input: { password: string; code: string }) =>
+    api.post<{ recovery_codes: string[] }>("/api/v1/auth/mfa/recovery-codes/", input, {
+      unscoped: true,
+    }),
   register: async (input: {
     email: string;
     password: string;

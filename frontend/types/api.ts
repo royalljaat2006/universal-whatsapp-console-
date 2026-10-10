@@ -26,6 +26,23 @@ export interface User {
   full_name: string;
   is_staff: boolean;
   is_email_verified: boolean;
+  mfa_enabled: boolean;
+}
+
+/** Returned by sign-in when the password was right but a second factor is still needed. */
+export interface MfaChallenge {
+  mfa_required: true;
+}
+
+export interface MfaStatus {
+  enabled: boolean;
+  recovery_codes_remaining: number;
+  required_for_staff: boolean;
+}
+
+export interface MfaEnrolment {
+  secret: string;
+  otpauth_uri: string;
 }
 
 export interface OrganizationSummary {

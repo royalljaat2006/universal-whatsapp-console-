@@ -11,6 +11,7 @@ from django.conf import settings
 from django.contrib import admin
 from django.urls import URLPattern, URLResolver, include, path
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
+from rest_framework.permissions import AllowAny, IsAuthenticated
 
 from apps.audit.api import AuditLogListView
 from apps.businesses.access_api import BusinessAccessRevokeView, BusinessAccessView, MemberScopeView
@@ -139,7 +140,9 @@ api_v1: list[URLPattern | URLResolver] = [
         name="template-detail",
     ),
     path("audit-logs/", AuditLogListView.as_view(), name="audit-log-list"),
-    path("notifications/", notifications_api.NotificationListView.as_view(), name="notification-list"),
+    path(
+        "notifications/", notifications_api.NotificationListView.as_view(), name="notification-list"
+    ),
     path(
         "notifications/unread-count/",
         notifications_api.NotificationUnreadCountView.as_view(),
@@ -174,7 +177,15 @@ api_v1: list[URLPattern | URLResolver] = [
     path("campaigns/", include("apps.campaigns.urls")),
     path("audiences/", include("apps.campaigns.audience_urls")),
     path("exports/", include("apps.reports.urls")),
-    path("schema/", SpectacularAPIView.as_view(), name="openapi-schema"),
+    # The schema enumerates every endpoint and field, so it is not public in
+    # production: authenticated users only (open in DEBUG for local tooling).
+    path(
+        "schema/",
+        SpectacularAPIView.as_view(
+            permission_classes=[AllowAny] if settings.DEBUG else [IsAuthenticated]
+        ),
+        name="openapi-schema",
+    ),
 ]
 
 if settings.DEBUG:

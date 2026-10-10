@@ -33,6 +33,7 @@ from apps.reports.models import ExportJob
 from apps.whatsapp.models import WhatsAppPhoneNumber
 from core.api.pagination import StandardCursorPagination
 from core.exceptions import DomainError, NotFoundError
+from core.limits import enforce_cap
 
 MAX_EXPORT_DAYS = 400
 DATA_PERMISSION = {
@@ -190,6 +191,14 @@ class ExportListCreateView(OrganizationScopedMixin, generics.ListAPIView):
         if not isinstance(raw, dict):
             raise DomainError("params must be an object.")
         params, filename = self._params(kind, raw)
+        enforce_cap(
+            setting="MAX_ACTIVE_EXPORTS_PER_ORG",
+            current=ExportJob.objects.for_organization(self.organization)
+            .filter(status__in=[ExportJob.Status.PENDING, ExportJob.Status.RUNNING])
+            .count(),
+            noun="exports in progress",
+            hint="Wait for them to finish, then try again.",
+        )
         with transaction.atomic():
             job = ExportJob.objects.create(
                 organization=self.organization,

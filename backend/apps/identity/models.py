@@ -60,3 +60,46 @@ class User(AbstractBaseUser, PermissionsMixin):
 
     def __str__(self) -> str:
         return self.email
+
+
+class TOTPDevice(models.Model):
+    """A user's authenticator-app enrolment (RFC 6238 TOTP). One per user.
+
+    ``confirmed_at`` is null until the user proves possession by entering a
+    valid code; an unconfirmed device never gates login. The secret is stored
+    only encrypted (core.crypto, the same Fernet keys as provider tokens) and
+    is never returned again after enrolment. ``last_used_step`` is the TOTP
+    time-step of the most recently accepted code: a code is accepted only for
+    a strictly later step, so an observed code cannot be replayed."""
+
+    id = models.UUIDField(primary_key=True, default=uuid7, editable=False)
+    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name="totp_device")
+    encrypted_secret = models.BinaryField(editable=False)
+    confirmed_at = models.DateTimeField(null=True, blank=True)
+    last_used_step = models.BigIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self) -> str:
+        return f"TOTP for {self.user_id} ({'confirmed' if self.confirmed_at else 'pending'})"
+
+
+class RecoveryCode(models.Model):
+    """A single-use fallback for a lost authenticator. Only a keyed hash of the
+    code is stored (see apps.identity.mfa.hash_recovery_code); the plaintext is
+    shown once at generation."""
+
+    id = models.UUIDField(primary_key=True, default=uuid7, editable=False)
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="recovery_codes")
+    code_hash = models.CharField(max_length=64)
+    used_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["user", "code_hash"], name="identity_recoverycode_unique"
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"recovery code for {self.user_id} ({'used' if self.used_at else 'unused'})"

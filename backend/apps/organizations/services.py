@@ -16,6 +16,7 @@ from apps.audit.services import record as audit
 from apps.organizations.models import Invitation, Membership, Organization, Permission, Role
 from apps.organizations.permissions import DEFAULT_ROLES, OWNER_ROLE_KEY, PERMISSIONS
 from core.exceptions import ConflictError, DomainError, NotFoundError
+from core.limits import enforce_cap
 
 INVITATION_TTL_DAYS = 7
 
@@ -188,6 +189,14 @@ def create_invitation(
     )
     if pending_exists:
         raise ConflictError("An invitation is already pending for this email.")
+    enforce_cap(
+        setting="MAX_PENDING_INVITATIONS_PER_ORG",
+        current=Invitation.objects.for_organization(organization)
+        .filter(status=Invitation.Status.PENDING)
+        .count(),
+        noun="pending invitations",
+        hint="Revoke old invitations or wait for them to be accepted.",
+    )
     scope = (
         Membership.BusinessScope.ALL
         if role_key in ALL_BUSINESS_ROLES and businesses is None

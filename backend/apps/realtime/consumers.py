@@ -18,6 +18,7 @@ from channels.generic.websocket import AsyncJsonWebsocketConsumer
 
 from apps.businesses.models import Business
 from apps.businesses.services import can_access_business
+from apps.identity.authentication import session_satisfies_mfa
 from apps.organizations.models import Membership
 from apps.organizations.services import get_active_membership, has_permission
 from apps.realtime.publisher import business_group, membership_group
@@ -27,9 +28,12 @@ CLOSE_FORBIDDEN = 4403
 
 
 @database_sync_to_async
-def _authorised(
-    user: Any, organization_id: uuid.UUID, business_id: uuid.UUID
-) -> Membership | None:
+def _mfa_satisfied(user: Any, session: Any) -> bool:
+    return session_satisfies_mfa(user, session)
+
+
+@database_sync_to_async
+def _authorised(user: Any, organization_id: uuid.UUID, business_id: uuid.UUID) -> Membership | None:
     membership = get_active_membership(user, organization_id)
     if membership is None or not has_permission(membership, "conversations.view"):
         return None
@@ -55,6 +59,11 @@ class RealtimeConsumer(AsyncJsonWebsocketConsumer):
         self.groups_joined = []
         user = self.scope.get("user")
         if user is None or not user.is_authenticated:
+            await self.close(code=CLOSE_UNAUTHORIZED)
+            return
+        # Same second-factor rule as the REST API: a session that never passed
+        # MFA (e.g. created via the admin login) must not open a socket.
+        if not await _mfa_satisfied(user, self.scope.get("session")):
             await self.close(code=CLOSE_UNAUTHORIZED)
             return
         query = parse_qs(self.scope.get("query_string", b"").decode())

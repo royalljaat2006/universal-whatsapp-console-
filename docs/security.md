@@ -43,6 +43,65 @@ same-origin referrer policy.
 - Login is throttled (10/min) and both success and failure are audited.
   Passwords must be at least 12 characters and pass Django's validators.
 
+### Two-step verification (TOTP)
+
+Opt-in per user (Settings > Your account > Two-step verification). Standard
+RFC 6238 authenticator-app codes (HMAC-SHA1, 6 digits, 30 s), implemented on
+the standard library in `apps/identity/mfa.py`; the implementation is checked
+against the RFC's published test vectors.
+
+- **Secrets** are encrypted at rest with the same Fernet keys as provider
+  tokens (`FIELD_ENCRYPTION_KEYS`) and shown to the user exactly once, at
+  enrolment. Nothing is enforced until the user confirms with a valid code.
+- **Sign-in is two steps.** A correct password for a user with MFA does *not*
+  log them in; it parks a short-lived (5 min) pending marker in the anonymous
+  session and returns `{"mfa_required": true}`. `POST /auth/mfa/verify/`
+  promotes it to a real session, which then carries a stamp of the user's
+  *current* enrolment.
+- **No bypass paths.** `MFASessionAuthentication` (REST), the admin guard
+  middleware (`/admin/`) and the WebSocket consumer all require that stamp
+  for users who have MFA. A session created any other way (for example the
+  Django admin login) is refused with `MFA_REQUIRED`. Because the stamp is
+  tied to the enrolment, enabling MFA - or removing and re-adding a device -
+  signs out every other existing session of that user.
+- **Replay protection.** A code is accepted only for a time-step later than
+  the last accepted one, advanced with a conditional `UPDATE`, so a code
+  observed on the wire (or two concurrent requests with the same code)
+  cannot be used twice.
+- **Brute force.** Three independent limits: the `auth` throttle (10/min); the
+  pending sign-in dies after 5 wrong codes; and a per-*account* counter
+  (10 failures / 15 min) that survives restarting the login or changing IP.
+  While locked, even a correct code is refused. Failures and lockouts are
+  audited.
+- **Recovery codes.** 10 single-use codes (~49 bits each), stored only as
+  keyed HMAC-SHA256 hashes, consumed with an atomic update. A new set
+  replaces all old ones and needs password plus a current authenticator code.
+- **Re-authentication.** Starting enrolment needs the current password
+  (a hijacked session cannot enrol an attacker's authenticator). Turning MFA
+  off needs password *and* a valid code or recovery code. A wrong password
+  returns 403 `REAUTHENTICATION_FAILED`, deliberately not 401, so the client
+  does not treat it as an expired session.
+- **Rollout (no one is locked out).** MFA is off for everyone until they opt in.
+  `MFA_REQUIRED_FOR_STAFF=true` additionally requires platform operators
+  (`is_staff`) to have enrolled before they can use `/api/v1/platform/*`
+  (403 `MFA_SETUP_REQUIRED`). Suggested order: ship with the flag off, have
+  each operator enrol, verify, then switch the flag on. Organization-level
+  enforcement for customers is not implemented; it would need an
+  organization setting and a grace period, and is a deliberate follow-up.
+- **API keys are non-interactive.** A key authenticates as its creator and is not
+  subject to the second factor (enabling MFA does not break integrations), but
+  `InteractiveSessionOnly` refuses keys on the account-security endpoints (MFA
+  management, account deletion): those confirm the password, and a leaked key
+  must not become a password oracle or a way to change who can sign in.
+- **Invitations** can only create a brand-new account (an existing email is a
+  409), so an invitation token can never sign in an existing MFA user.
+- **Known limits.** Recovery by email is not offered (it would reintroduce a
+  password-only path). A user who loses both device and recovery codes needs an
+  operator to run `python manage.py reset_mfa --email <address>` (audited,
+  asks for confirmation; verify the person's identity first). There is no QR code in
+  the enrolment screen (no extra frontend dependency); the key and an
+  `otpauth://` link are shown instead.
+
 ## Authorization (RBAC)
 
 - Code checks **permissions** (`messages.send`), never role names. The
@@ -123,6 +182,15 @@ Celery workers/beat all connect as the plain owning role and are completely
 unaffected — RLS only ever engages for the one code path that explicitly
 opts in.
 
+Enforced by `tests/integration/test_row_level_security.py`, which connects
+as the restricted role exactly as a request does and asserts: every
+`TenantScopedModel` table has RLS enabled and a policy (so a new tenant model
+without one fails CI); each tenant sees only its own rows; no tenant context
+returns zero rows (fail closed); cross-tenant `UPDATE`/`DELETE` affect nothing;
+inserting into, or moving a row to, another tenant is rejected; and the role is
+neither superuser nor `BYPASSRLS`. The notes below describe the earlier manual
+verification.
+
 Verified against a real database, twice — with a temporary
 `APP_DATABASE_URL`-based design initially (superseded, see git history) and
 again with the final `SET LOCAL ROLE` design: with the restricted role
@@ -133,6 +201,20 @@ the correct `organization_id`, only that tenant's rows; with a different
 `onboarding.spec.ts`, `tenant-isolation.spec.ts`), which exercises
 registration, login, business creation and cross-tenant isolation through
 the real API with RLS engaged.
+
+## Operational safeguards
+
+Per-organization caps against runaway or hostile volume (`core/limits.py`),
+independent of any subscription plan; generous defaults, `0` disables each:
+`MAX_ACTIVE_API_KEYS_PER_ORG` (50), `MAX_PENDING_INVITATIONS_PER_ORG` (100,
+each invitation is an outbound email), `MAX_ACTIVE_EXPORTS_PER_ORG` (5 queued or
+running). Hitting one returns 409 `OPERATIONAL_LIMIT_REACHED` with the limit.
+Existing guards: `CAMPAIGN_MAX_RECIPIENTS`, `CAMPAIGN_MAX_RATE_PER_MINUTE`, CSV
+import 5,000 rows, webhook body size, nginx body limits, request throttles. The
+check-then-create is not serialised, so a burst can overshoot a cap slightly.
+
+The OpenAPI schema (`/api/v1/schema/`) is readable only by signed-in users
+outside `DEBUG`.
 
 ## Business access management (Cycle 2)
 

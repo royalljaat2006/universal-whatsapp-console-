@@ -14,6 +14,12 @@ AUTH_PASSWORD_RESET_COMPLETED = (
 AUTH_EMAIL_VERIFIED = "auth.email_verified"
 AUTH_EMAIL_VERIFICATION_RESENT = "auth.email_verification_resent"
 AUTH_ACCOUNT_DELETED = "auth.account_deleted"
+AUTH_MFA_ENROLLED = "auth.mfa_enrolled"
+AUTH_MFA_DISABLED = "auth.mfa_disabled"
+AUTH_MFA_FAILED = "auth.mfa_failed"
+AUTH_MFA_LOCKED_OUT = "auth.mfa_locked_out"
+AUTH_MFA_RECOVERY_USED = "auth.mfa_recovery_code_used"
+AUTH_MFA_RECOVERY_REGENERATED = "auth.mfa_recovery_codes_regenerated"
 
 ORGANIZATION_CREATED = "organization.created"
 MEMBER_ADDED = "member.added"

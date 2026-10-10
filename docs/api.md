@@ -42,7 +42,13 @@
 | Method & path | Permission | Notes |
 |---|---|---|
 | `GET /api/v1/auth/csrf/` | — | sets the CSRF cookie |
-| `POST /api/v1/auth/login/` | — | `{email, password}`; CSRF enforced; throttled |
+| `POST /api/v1/auth/login/` | — | `{email, password}`; CSRF enforced; throttled. Returns the user, or `{"mfa_required": true}` when a second step is needed |
+| `POST /api/v1/auth/mfa/verify/` | pending sign-in | `{code}` or `{recovery_code}`; completes sign-in |
+| `GET /api/v1/auth/mfa/` | authenticated | `{enabled, recovery_codes_remaining, required_for_staff}` |
+| `POST /api/v1/auth/mfa/setup/` | authenticated | `{password}` -> `{secret, otpauth_uri}` (shown once) |
+| `POST /api/v1/auth/mfa/confirm/` | authenticated | `{code}` -> `{recovery_codes}` (shown once); turns MFA on |
+| `POST /api/v1/auth/mfa/disable/` | authenticated | `{password, code or recovery_code}` |
+| `POST /api/v1/auth/mfa/recovery-codes/` | authenticated | `{password, code}` -> new `{recovery_codes}` |
 | `POST /api/v1/auth/logout/` | authenticated | |
 | `GET /api/v1/auth/me/` | authenticated | |
 | `GET /api/v1/organizations/` | authenticated | your memberships + permission codes (no org header) |
@@ -198,6 +204,18 @@ may access. Close codes: `4401` unauthenticated, `4403` not a member, missing
 permission, or no access to the business.
 
 <a id="rate-limits"></a>
+## Authentication error codes
+
+| Code | Status | Meaning |
+|---|---|---|
+| `MFA_REQUIRED` | 401 | the session never completed the second factor; sign in again |
+| `INVALID_MFA_CODE` | 401 | wrong, expired or already-used code |
+| `MFA_SESSION_EXPIRED` | 401 | the password step expired or was used up; start sign-in again |
+| `MFA_LOCKED_OUT` | 429 | too many wrong codes for this account; wait about 15 minutes |
+| `REAUTHENTICATION_FAILED` | 403 | wrong current password on a sensitive action |
+| `MFA_SETUP_REQUIRED` | 403 | platform access needs MFA enrolled (`MFA_REQUIRED_FOR_STAFF`) |
+| `OPERATIONAL_LIMIT_REACHED` | 409 | a per-organization safety cap was reached (`details.limit`) |
+
 ## Rate limits
 
 See [messaging-architecture.md](messaging-architecture.md#rate-limiting-summary).

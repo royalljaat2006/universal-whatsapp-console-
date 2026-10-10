@@ -13,6 +13,7 @@ from apps.audit.services import record as audit
 from apps.organizations.models import Organization
 from apps.organizations.permissions import PERMISSIONS
 from core.exceptions import ConflictError, DomainError
+from core.limits import enforce_cap
 
 TOKEN_PREFIX = "wcapi_"
 # "wcapi_" + 12 random chars is the stored, plaintext lookup key; the rest of
@@ -42,6 +43,19 @@ def create_api_key(
     unknown = set(scopes) - set(PERMISSIONS)
     if unknown:
         raise InvalidScopeError(f"Unknown permission codes: {sorted(unknown)}")
+    now = timezone.now()
+    active = (
+        ApiKey.objects.for_organization(organization)
+        .filter(revoked_at__isnull=True)
+        .exclude(expires_at__lte=now)
+        .count()
+    )
+    enforce_cap(
+        setting="MAX_ACTIVE_API_KEYS_PER_ORG",
+        current=active,
+        noun="active API keys",
+        hint="Revoke keys you no longer use.",
+    )
     raw_key = TOKEN_PREFIX + secrets.token_urlsafe(32)
     prefix = raw_key[:PREFIX_LENGTH]
     api_key = ApiKey.objects.create(

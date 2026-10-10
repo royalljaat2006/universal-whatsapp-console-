@@ -27,6 +27,7 @@ import { teamInvitationService } from "@/services/invitations";
 import { organizationService } from "@/services/organizations";
 import { roleService } from "@/services/roles";
 import { useSession } from "@/stores/session-context";
+import { SecuritySettings } from "./security-settings";
 import type {
   ApiKey,
   CreatedApiKey,
@@ -228,6 +229,7 @@ export function AccountSettings() {
           ]}
         />
       </Panel>
+      <SecuritySettings />
       <Panel
         title="Delete account"
         description="Permanent. You must transfer or delete ownership of any organization you're the sole owner of first."
