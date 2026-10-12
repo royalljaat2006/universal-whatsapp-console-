@@ -181,6 +181,151 @@ Workers stream rows from chunked iterators into object storage (`exports/…`).
 Cells beginning with `= + - @` are prefixed with `'` (CSV injection).
 Requests and downloads are audited.
 
+## Template Studio
+
+Rules live in `apps/templates/studio.py` (pure checks), `studio_service.py`
+(drafts, confirmed submit, reconcile) and `guidance.py` (plain status). The
+limits are from Meta's template documentation (read 2026-10-12): name lowercase
+letters/digits/underscores up to 512; header text up to 60 with one variable;
+body up to 1024; footer up to 60 and plain text; every variable needs an example;
+positional variables numbered from 1 with no gaps, named ones lowercase and
+underscores; a body cannot start or end with a variable; up to 10 buttons (quick
+replies first, then website, then call; button text up to 25; at most 2 website
+and 1 call button); the same body and footer as an existing template is rejected;
+100 creations per account per hour. Supported: MARKETING and UTILITY, a text
+header, body, footer, quick-reply / website / call buttons. Not supported (stated
+in the API, not hidden): AUTHENTICATION templates, media or location headers,
+copy-code and other buttons. Content review (policy, spam, category fit) is
+Meta's; the console cannot predict it.
+
+- `GET /api/v1/templates/studio/options/` (`templates.view`): categories, languages,
+  limits, starters (editable examples, not approved templates), what is unsupported.
+- `POST /api/v1/templates/studio/validate/` (`templates.manage`): errors, warnings,
+  counts, preview and the components that would be sent. Saves and sends nothing.
+- `GET|POST /api/v1/templates/drafts/`, `GET|PATCH|DELETE .../drafts/<id>/`: local
+  drafts, scoped to the caller's businesses (foreign or out-of-scope ids are 404).
+  A draft response carries live `checks`, a `content_hash` and `guidance`.
+- `POST .../drafts/<id>/submit/` `{confirm: true, content_hash}`: the only call that
+  sends a template to Meta. `confirm` must be true and the hash must equal the hash
+  of the draft as it is now (what was reviewed is what is sent). The draft row is
+  locked and moved `draft -> submitting` in a committed transaction before the
+  provider call, so a repeated or concurrent submit is refused; a unique constraint
+  backs this up. Meta refusing leaves an editable draft with Meta's reason. An
+  unknown outcome (timeout) makes the draft `unconfirmed`: it cannot be re-sent
+  until a sync completed after the attempt shows whether Meta has it.
+- `POST .../drafts/<id>/check/` queues a template sync ("Check with Meta").
+- `GET /api/v1/templates/<id>/guidance/`: `state` (draft | submitted | pending |
+  approved | rejected | paused | disabled | unknown), Meta's status verbatim,
+  `verified_by_meta` (the status was reported by a sync or webhook AFTER the submit,
+  not just returned by the create request), plain explanation and next step, and for
+  a rejection Meta's reason code verbatim with meaning and how to fix. `can_send`
+  requires approved AND verified. An unrecognised status is shown verbatim and is
+  never sendable.
+- `POST .../templates/<id>/copy-to-draft/`: a corrected copy of a rejected template as
+  a new draft under a new name (`_v2`, `_v3`). Sends nothing.
+
+Audit: `template.draft_saved`, `template.draft_deleted`, `template.submit_requested`,
+`template.submitted`, `template.submit_failed`. Metadata holds ids, name, language,
+category, hash prefix and error codes only: never the message text, examples or
+credentials. Drafts live in `templates_templatedraft` (migration 0005, with the
+row-level-security policy in core migration 0004).
+
+## WhatsApp setup and the verified test message
+
+Rules live in `apps/whatsapp/onboarding.py` and `test_message.py`.
+
+- `GET /api/v1/whatsapp/setup/` (`numbers.view`, scoped to the selected business
+  or every business the caller may access): readiness derived only from stored
+  evidence; never calls Meta. Returns `overall` (`not_started|in_progress|blocked|ready`),
+  `summary`, `next_step`, ordered `steps` and a `server` check. Each step has
+  `state` (`verified|pending|failed|unsupported|unknown`), plain `detail`/`next_step`,
+  `fix_in` (`console|meta|administrator|none`), `action` and `evidence`. Steps:
+  connection, numbers, webhook_subscription (what Meta reports), webhook_delivery
+  (verified only by a signed event that was stored for this account; an unsigned
+  request is rejected and is not evidence), templates, test_message (from real
+  message status). `capabilities` states openly what is unsupported (Embedded
+  Signup not configured; the console cannot read the callback URL saved in the
+  Meta app). `ready` requires connection, numbers, webhook_subscription and a
+  delivered test message.
+- `POST /api/v1/whatsapp/embedded-signup/session/` `{business_id}` (`numbers.manage`)
+  returns a one-time `state` (cache, 15 min, bound to user, organization and
+  business). `embedded-signup/complete/` now requires it; it is burned on first use,
+  so forged, replayed, cross-user and cross-business completions are refused
+  before any Meta call.
+- `POST /whatsapp/test-message/preview/` (`messages.send`) `{phone_number_id,
+  contact_id | to, attest_consent?, template_id?}` returns exactly what would be
+  sent (sender, recipient, content, template, cost, restrictions, blockers) and,
+  only when sendable, a single-use `approval.token` (10 min). It sends nothing.
+  Content is chosen by the server: an approved template with no variables.
+  The recipient must be an opted-in contact or a number the user attests agreed
+  (opted-out contacts are refused).
+- `POST /whatsapp/test-message/send/` `{approval_token, approve: true}` is the
+  separate gate. The preview is rebuilt from live data and must match; the send
+  goes through `enqueue_outbound_message` (scope, number-connected, template
+  rules, queue, rate limit, audit) with idempotency key `testmsg:<hash(token)>`.
+  Response says queued only; read `GET /messages/<id>/` for the provider-reported
+  status. `POST .../cancel/` discards an approval. Audit: `whatsapp.test_message_approved`
+  and `_cancelled` (ids and categories only).
+
+## Failed-message recovery
+
+Read endpoints need `conversations.view`; retry needs `messages.send`. All are
+tenant- and business-scoped (a foreign or out-of-scope id is 404). Rules live in
+`apps/messaging/services/recovery.py` and reuse `failure_categories`.
+
+- `GET /api/v1/messages/failures/?days=7&limit=25` (days 1-30, limit up to 50):
+  `{ total, shown, kinds: {retryable|not_retryable|unknown|external: n}, results: [...] }`.
+  Each result: recipient, sender number, short preview, `failed_at`, and
+  `recovery { category, label, kind, explanation, next_step, provider_code,
+  safe_error, can_retry, blockers[{code,message}], links[{label,url}],
+  retried_as }`. `safe_error` is trimmed and token-like text is hidden.
+  `retried_as` is the retry message's own stored status (never inferred).
+- `GET /api/v1/messages/<id>/recovery/`: the same plus `retry_preview`
+  (only when a retry is allowed): destination, message text, duplicate-risk
+  statement and `cost` (`free` | `estimate` from the loaded rate card | `unknown`).
+- `POST /api/v1/messages/<id>/retry/` `{"confirm": true}`: queues ONE retry
+  (202, `status_note` says "accepted for sending", not delivered). Refused with
+  409 `RETRY_NOT_ALLOWED` and `details.blockers` otherwise.
+
+A retry is allowed only when the message is a failed, outbound, non-campaign
+message whose category is in `failure_categories.RETRYABLE` (rate limit,
+authentication, temporary), is under 7 days old, has not been retried, has no
+later identical non-failed message, and its number is connected. Unknown,
+timeout (outcome unknown), invalid-recipient, template, policy and Meta-only
+failures are never retried. Duplicate protection: the retry uses the key
+`retry:<original id>`, so the database's unique (organization, idempotency_key)
+constraint makes a second retry impossible even under concurrent requests.
+Audit: `message.retry_requested`, `message.retry_refused`, and
+`message.retry_outcome` (written when the retry is delivered or fails); only ids,
+category and code are recorded. Official destinations returned for Meta-only
+fixes: WhatsApp Manager and Meta's error-code reference.
+
+## WhatsApp connection health
+
+`GET /api/v1/whatsapp/health/` (`numbers.view`; scoped to the selected business,
+or every business the caller may access): plain-language health of the
+WhatsApp accounts and numbers. Read-only and derived only from stored signals
+(`apps/whatsapp/health.py`); it never calls Meta in the request and never
+returns tokens or provider ids.
+
+```
+{ generated_at, overall: healthy|attention|problem|unknown, summary,
+  accounts: [{ id, name, business_id, business_name, overall, last_checked_at, checks: [...] }],
+  numbers:  [{ id, label, display_phone_number, verified_name, business_id, business_name,
+               business_account_id, overall, last_checked_at, checks: [...] }],
+  recent_alerts: [{ id, severity, summary, occurred_at, business_name }],
+  notes: [...] }
+check = { code, state: ok|warning|problem|unknown, title, detail, next_step,
+          fix_in: console|meta|none, basis: provider|console, action: ""|"refresh" }
+```
+
+Rules: a missing signal is `unknown`, never `ok`; a provider value the app does
+not recognise is shown verbatim as a warning; `basis: console` marks this app's
+own thresholds (stale after 24 h, failure rate over the last 24 h) as distinct
+from what Meta reported; `fix_in: meta` means the fix exists only in Meta's own
+interface (for example WhatsApp Manager). `last_checked_at` lets a client verify
+that a refresh (`POST /accounts/<id>/verify|sync/`) really re-read Meta.
+
 ## Platform: backups
 
 `GET /api/v1/platform/backups/` (platform staff): history of database backup
