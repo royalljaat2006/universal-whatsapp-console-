@@ -25,6 +25,15 @@ from tests.integration.test_domain_services import _connect_routes
 pytestmark = pytest.mark.django_db(transaction=True)
 
 
+def _state(api: Any, business: Any) -> str:
+    """The one-time value the browser gets before opening Meta's dialog."""
+    response = api.post(
+        "/api/v1/whatsapp/embedded-signup/session/", {"business_id": str(business.pk)}, format="json"
+    )
+    assert response.status_code == 200, response.content
+    return response.json()["state"]
+
+
 def test_config_reports_whether_embedded_signup_is_configured(owner_api: Any) -> None:
     response = owner_api.get("/api/v1/whatsapp/embedded-signup/config/")
     assert response.status_code == 200
@@ -58,6 +67,7 @@ def test_completes_signup_and_runs_the_connection_pipeline(
             "waba_id": "4242424242",
             "phone_number_id": "5550001112",
             "code": "AQD_shortlived_code",
+            "state": _state(owner_api, kiosk),
         },
         format="json",
     )
@@ -102,6 +112,7 @@ def test_expired_code_fails_cleanly_without_creating_anything(
             "waba_id": "111222333",
             "phone_number_id": "5550001112",
             "code": "expired",
+            "state": _state(owner_api, kiosk),
         },
         format="json",
     )
@@ -134,6 +145,7 @@ def test_phone_registration_failure_does_not_block_the_connection(
             "waba_id": "4242424242",
             "phone_number_id": "5550001112",
             "code": "AQD_shortlived_code",
+            "state": _state(owner_api, kiosk),
         },
         format="json",
     )
@@ -159,6 +171,7 @@ def test_embedded_signup_into_inaccessible_business_is_404(organization: Any) ->
             "waba_id": "999999999",
             "phone_number_id": "5550001112",
             "code": "irrelevant",
+            "state": "unused-state-value",
         },
         format="json",
     )
@@ -175,6 +188,7 @@ def test_agent_cannot_complete_embedded_signup(organization: Any) -> None:
             "waba_id": "999999999",
             "phone_number_id": "5550001112",
             "code": "irrelevant",
+            "state": "unused-state-value",
         },
         format="json",
     )

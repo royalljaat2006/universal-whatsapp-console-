@@ -22,6 +22,7 @@ from apps.notifications import api as notifications_api
 from apps.organizations.api import invitations as invitations_api
 from apps.teams import api as teams_api
 from apps.templates import api as templates_api
+from apps.templates import studio_api as templates_studio_api
 from apps.webhooks.views import meta_whatsapp_webhook
 from core.health import views as health_views
 
@@ -132,6 +133,46 @@ api_v1: list[URLPattern | URLResolver] = [
     ),
     path("media/", include("apps.media.urls")),
     path("templates/", templates_api.MessageTemplateListView.as_view(), name="template-list"),
+    path(
+        "templates/studio/options/",
+        templates_studio_api.StudioOptionsView.as_view(),
+        name="template-studio-options",
+    ),
+    path(
+        "templates/studio/validate/",
+        templates_studio_api.StudioValidateView.as_view(),
+        name="template-studio-validate",
+    ),
+    path(
+        "templates/drafts/",
+        templates_studio_api.DraftListCreateView.as_view(),
+        name="template-draft-list",
+    ),
+    path(
+        "templates/drafts/<uuid:pk>/",
+        templates_studio_api.DraftDetailView.as_view(),
+        name="template-draft-detail",
+    ),
+    path(
+        "templates/drafts/<uuid:pk>/submit/",
+        templates_studio_api.DraftSubmitView.as_view(),
+        name="template-draft-submit",
+    ),
+    path(
+        "templates/drafts/<uuid:pk>/check/",
+        templates_studio_api.DraftCheckView.as_view(),
+        name="template-draft-check",
+    ),
+    path(
+        "templates/<uuid:pk>/guidance/",
+        templates_studio_api.TemplateGuidanceView.as_view(),
+        name="template-guidance",
+    ),
+    path(
+        "templates/<uuid:pk>/copy-to-draft/",
+        templates_studio_api.CopyToDraftView.as_view(),
+        name="template-copy-to-draft",
+    ),
     path("templates/sync/", templates_api.TemplateSyncView.as_view(), name="template-sync"),
     path("templates/create/", templates_api.TemplateCreateView.as_view(), name="template-create"),
     path(

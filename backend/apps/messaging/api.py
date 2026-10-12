@@ -4,6 +4,9 @@ GET  /api/v1/messages/?conversation=<id>        timeline (cursor, newest first)
 POST /api/v1/messages/                          accept an outbound send (202)
 GET  /api/v1/messages/<id>/                      detail
 GET  /api/v1/messages/<id>/status-history/       every provider status report
+GET  /api/v1/messages/failures/                  recent failures + guided recovery
+GET  /api/v1/messages/<id>/recovery/             one failure: next step + retry preview
+POST /api/v1/messages/<id>/retry/                queue one safe retry ({"confirm": true})
 
 Send types (the browser sends values, never provider payloads):
 - ``text``      {"text": {"body", "preview_url"?}}
@@ -14,17 +17,22 @@ Supply an ``Idempotency-Key`` header to make retries of the POST safe.
 """
 
 import re
+from datetime import timedelta
 from typing import Any
 
 from django.db.models import Prefetch, QuerySet
+from django.utils import timezone
 from rest_framework import generics, serializers, status
 from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.views import APIView
 
+from apps.audit import actions
+from apps.audit.services import record as audit
 from apps.contacts.services import InvalidIdentifierError, normalize_phone, validate_bsuid
-from apps.messaging.models import Message, MessageAttachment, MessageStatusEvent
+from apps.messaging.models import Direction, Message, MessageAttachment, MessageStatusEvent
+from apps.messaging.services import recovery
 from apps.messaging.services.outbound import (
     MediaSend,
     SendRequest,
@@ -32,9 +40,10 @@ from apps.messaging.services.outbound import (
     TemplateSend,
     enqueue_outbound_message,
 )
+from apps.messaging.state import MessageStatus
 from apps.organizations.api.scoping import OrganizationScopedMixin
 from core.api.pagination import StandardCursorPagination
-from core.exceptions import NotFoundError
+from core.exceptions import DomainError, NotFoundError
 from providers.whatsapp.types import TextContent
 
 IDEMPOTENCY_HEADER = "Idempotency-Key"
@@ -288,6 +297,224 @@ class StatusEventSerializer(serializers.ModelSerializer):
         model = MessageStatusEvent
         fields = ["status", "provider_status", "occurred_at", "applied", "errors", "pricing"]
         read_only_fields = fields
+
+
+class RetryNotAllowed(DomainError):
+    code = "RETRY_NOT_ALLOWED"
+    status_code = status.HTTP_409_CONFLICT
+    default_message = "This message cannot be retried."
+
+
+def _replacement_payload(replacement: Message | None) -> dict[str, Any] | None:
+    """The retry's own, current state exactly as stored: never inferred."""
+    if replacement is None:
+        return None
+    payload: dict[str, Any] = {
+        "id": str(replacement.pk),
+        "status": replacement.status,
+        "status_label": replacement.get_status_display(),
+        "created_at": replacement.created_at,
+        "accepted_at": replacement.accepted_at,
+        "sent_at": replacement.sent_at,
+        "delivered_at": replacement.delivered_at,
+        "read_at": replacement.read_at,
+        "failed_at": replacement.failed_at,
+        "failure": None,
+    }
+    if replacement.status == MessageStatus.FAILED:
+        info = recovery.assess(replacement)
+        payload["failure"] = {
+            "category": info.category,
+            "label": info.label,
+            "safe_error": info.safe_error,
+            "can_retry": info.can_retry,
+        }
+    return payload
+
+
+def _recovery_payload(message: Message, info: recovery.Recovery) -> dict[str, Any]:
+    contact = message.contact
+    return {
+        "id": str(message.pk),
+        "conversation_id": str(message.conversation_id),
+        "business_id": str(message.business_id),
+        "message_type": message.message_type,
+        "status": message.status,
+        "preview": recovery.message_preview_text(message),
+        "occurred_at": message.occurred_at,
+        "failed_at": message.failed_at,
+        "recipient": {"name": contact.display_name or "", "phone_number": contact.phone_number},
+        "from_number": message.phone_number.display_phone_number,
+        "recovery": {
+            "category": info.category,
+            "label": info.label,
+            "kind": info.kind,
+            "explanation": info.explanation,
+            "next_step": info.next_step,
+            "provider_code": info.provider_code,
+            "safe_error": info.safe_error,
+            "can_retry": info.can_retry,
+            "blockers": [{"code": b.code, "message": b.message} for b in info.blockers],
+            "links": info.meta_links,
+            "retried_as": _replacement_payload(info.retried_as),
+        },
+    }
+
+
+def _failed_messages(view: Any) -> QuerySet[Message]:
+    return view.restrict_to_businesses(
+        Message.objects.for_organization(view.organization), "business"
+    ).select_related("contact", "phone_number", "organization")
+
+
+class FailedMessagesView(OrganizationScopedMixin, APIView):
+    """GET /api/v1/messages/failures/?days=7&limit=25: recent failed outbound
+    messages with a plain explanation and the one safe next step."""
+
+    required_permissions = {"get": "conversations.view"}
+
+    def get(self, request: Request) -> Response:
+        try:
+            days = min(max(int(request.query_params.get("days", 7)), 1), 30)
+            limit = min(max(int(request.query_params.get("limit", 25)), 1), 50)
+        except ValueError as exc:
+            raise serializers.ValidationError("days and limit must be whole numbers") from exc
+        since = timezone.now() - timedelta(days=days)
+        queryset = _failed_messages(self).filter(
+            direction=Direction.OUTBOUND, status=MessageStatus.FAILED, occurred_at__gte=since
+        )
+        if self.business is not None:
+            queryset = queryset.filter(business=self.business)
+        total = queryset.count()
+        rows = []
+        for message in queryset.order_by("-failed_at", "-occurred_at")[:limit]:
+            rows.append(_recovery_payload(message, recovery.assess(message)))
+        kinds: dict[str, int] = {}
+        for row in rows:
+            kinds[row["recovery"]["kind"]] = kinds.get(row["recovery"]["kind"], 0) + 1
+        return Response(
+            {
+                "generated_at": timezone.now(),
+                "days": days,
+                "total": total,
+                "shown": len(rows),
+                "kinds": kinds,
+                "results": rows,
+            }
+        )
+
+
+class MessageRecoveryView(OrganizationScopedMixin, APIView):
+    """GET /api/v1/messages/<id>/recovery/: what happened, what to do, and (when
+    a retry is allowed) exactly what a retry would send, to whom, and at what
+    known cost."""
+
+    required_permissions = {"get": "conversations.view"}
+
+    def get(self, request: Request, pk: str) -> Response:
+        message = _failed_messages(self).filter(pk=pk, direction=Direction.OUTBOUND).first()
+        if message is None:
+            raise NotFoundError("message not found")
+        info = recovery.assess(message)
+        payload = _recovery_payload(message, info)
+        payload["message_text"] = message.text[:2000]
+        payload["retry_preview"] = None
+        if info.can_retry:
+            payload["retry_preview"] = {
+                "destination": recovery.destination(message),
+                "message_text": message.text[:2000],
+                "duplicate_risk": {
+                    "level": "low",
+                    "text": (
+                        "WhatsApp did not send the original, so one retry should not "
+                        "duplicate it. It is sent once; a second retry of the same message "
+                        "is refused."
+                    ),
+                },
+                "cost": recovery.cost_preview(message),
+                "confirmation_required": True,
+            }
+        return Response(payload)
+
+
+class RetryRequestSerializer(serializers.Serializer):
+    confirm = serializers.BooleanField()
+
+
+class MessageRetryView(OrganizationScopedMixin, APIView):
+    """POST /api/v1/messages/<id>/retry/ {"confirm": true}: queue ONE retry of a
+    failed message when the authoritative rules allow it. The response is the
+    new message as queued; its delivery is reported later by WhatsApp."""
+
+    required_permissions = {"post": "messages.send"}
+    throttle_scope = "send"
+
+    def get_throttles(self) -> list[Any]:
+        return [*super().get_throttles(), ScopedRateThrottle()]
+
+    def post(self, request: Request, pk: str) -> Response:
+        body = RetryRequestSerializer(data=request.data)
+        body.is_valid(raise_exception=True)
+        if body.validated_data["confirm"] is not True:
+            raise serializers.ValidationError({"confirm": "Confirm the retry to continue."})
+        message = _failed_messages(self).filter(pk=pk, direction=Direction.OUTBOUND).first()
+        if message is None:
+            raise NotFoundError("message not found")
+
+        info = recovery.assess(message)
+        if not info.can_retry:
+            audit(
+                actions.MESSAGE_RETRY_REFUSED,
+                organization=self.organization,
+                actor=request.user,
+                resource=message,
+                metadata={
+                    "category": info.category,
+                    "blockers": [b.code for b in info.blockers],
+                },
+                request=request,
+            )
+            raise RetryNotAllowed(
+                info.blockers[0].message,
+                details={
+                    "blockers": [{"code": b.code, "message": b.message} for b in info.blockers]
+                },
+            )
+
+        retry, created = enqueue_outbound_message(
+            organization=self.organization,
+            request=recovery.build_retry_request(message),
+            scope=SendScope(
+                allowed_business_ids=self.allowed_business_ids,
+                business_id=self.business.pk if self.business else None,
+            ),
+            actor=request.user,
+            http_request=request,
+        )
+        audit(
+            actions.MESSAGE_RETRY_REQUESTED,
+            organization=self.organization,
+            actor=request.user,
+            resource=message,
+            metadata={
+                "retry_message_id": str(retry.pk),
+                "category": info.category,
+                "already_requested": not created,
+            },
+            request=request,
+        )
+        retry = message_queryset(Message.objects.filter(pk=retry.pk)).get()
+        return Response(
+            {
+                "created": created,
+                "message": MessageSerializer(retry).data,
+                "status_note": (
+                    "Retry queued. This only means it was accepted for sending; "
+                    "WhatsApp will report whether it was delivered."
+                ),
+            },
+            status=status.HTTP_202_ACCEPTED if created else status.HTTP_200_OK,
+        )
 
 
 class MessageStatusHistoryView(OrganizationScopedMixin, APIView):

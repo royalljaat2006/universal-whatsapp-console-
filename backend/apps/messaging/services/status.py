@@ -10,6 +10,7 @@ from apps.messaging.models import Direction, Message, MessageStatusEvent
 from apps.messaging.services import events, hooks
 from apps.messaging.services.error_catalog import hint
 from apps.messaging.services.errors import StatusTargetNotFoundError, UnroutableEventError
+from apps.messaging.services.retry_audit import record_outcome as record_retry_outcome
 from apps.messaging.state import (
     META_STATUS_MAP,
     TIMESTAMP_FIELD,
@@ -119,6 +120,7 @@ def apply_status_update(
     if applied:
         MessageStatusEvent.objects.filter(pk=status_event.pk).update(applied=True)
         events.message_status_changed(message)
+        record_retry_outcome(message)
     elif fields:
         # Timestamps/pricing changed without a status move (e.g. a late
         # "delivered" after "read"): derived analytics still need a refresh.

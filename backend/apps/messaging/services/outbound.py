@@ -70,6 +70,7 @@ from apps.messaging.services.errors import (
     TemplateNotSendableError,
     TemplateParametersInvalidError,
 )
+from apps.messaging.services.retry_audit import record_outcome as record_retry_outcome
 from apps.messaging.services.status import apply_transition
 from apps.messaging.state import MessageStatus
 from apps.organizations.models import Organization
@@ -534,6 +535,7 @@ def _fail(
             update_fields=[*fields, "error_code", "error_message", "error_details", "updated_at"]
         )
         events.message_status_changed(message)
+        record_retry_outcome(message)
 
 
 def cancel_queued_message(message_id: UUID, *, code: str, reason: str) -> bool:

@@ -5,11 +5,13 @@ report progress through ``connection_state`` / ``sync_state`` on the account.
 Credentials are write-only: no endpoint ever returns a token.
 """
 
+from datetime import timedelta
 from typing import Any
 
 from django.conf import settings
 from django.db import transaction
-from django.db.models import Count, QuerySet
+from django.db.models import Count, Q, QuerySet
+from django.utils import timezone
 from rest_framework import generics, serializers, status
 from rest_framework.request import Request
 from rest_framework.response import Response
@@ -18,7 +20,10 @@ from rest_framework.views import APIView
 from apps.audit import actions
 from apps.audit.services import record as audit
 from apps.businesses.services import get_business_for_membership
+from apps.messaging.services import failure_categories
+from apps.messaging.state import MessageStatus
 from apps.organizations.api.scoping import OrganizationScopedMixin
+from apps.whatsapp import health, signup_state
 from apps.whatsapp.models import (
     ProviderCredential,
     WhatsAppAccountEvent,
@@ -254,6 +259,27 @@ class EmbeddedSignupCompleteSerializer(serializers.Serializer):
         r"^\d{5,32}$", help_text="Phone number ID from the FINISH event"
     )
     code = serializers.CharField(max_length=2048, trim_whitespace=False)
+    state = serializers.CharField(
+        max_length=128, help_text="One-time value from POST embedded-signup/session/"
+    )
+
+
+class EmbeddedSignupSessionView(OrganizationScopedMixin, APIView):
+    """POST {business_id} -> {state, expires_in}. Call before opening Meta's
+    dialog; the completion call must return the same ``state`` (single use,
+    bound to this user, organization and business)."""
+
+    required_permissions = {"post": "numbers.manage"}
+
+    def post(self, request: Request, *args: Any, **kwargs: Any) -> Response:
+        business_id = request.data.get("business_id")
+        if not business_id:
+            raise serializers.ValidationError({"business_id": "required"})
+        business = get_business_for_membership(self.membership, business_id)
+        session = signup_state.issue_state(
+            user=request.user, organization=self.organization, business=business
+        )
+        return Response({"state": session.state, "expires_in": session.expires_in})
 
 
 class EmbeddedSignupCompleteView(OrganizationScopedMixin, APIView):
@@ -271,6 +297,9 @@ class EmbeddedSignupCompleteView(OrganizationScopedMixin, APIView):
         payload.is_valid(raise_exception=True)
         data = payload.validated_data
         business = get_business_for_membership(self.membership, data["business_id"])
+        signup_state.consume_state(
+            state=data["state"], user=request.user, organization=self.organization, business=business
+        )
         # Not wrapped in a transaction: this calls Meta twice (code exchange,
         # phone registration) around the DB writes, and provider calls never
         # run inside a database transaction (see module docstring).
@@ -500,3 +529,152 @@ class AccountEventListView(OrganizationScopedMixin, generics.ListAPIView):
         if params.get("phone_number"):
             queryset = queryset.filter(phone_number_id=params["phone_number"])
         return queryset
+
+
+class HealthView(OrganizationScopedMixin, APIView):
+    """GET /api/v1/whatsapp/health/ - plain-language health of the selected
+    business's WhatsApp accounts and numbers (every account the caller may see
+    without X-Business-ID).
+
+    Read-only and derived entirely from stored signals (see
+    ``apps.whatsapp.health``): it never calls Meta in the request, never
+    returns tokens or provider ids, and reports a missing signal as
+    ``unknown`` rather than healthy. ``POST /accounts/<id>/verify|sync/``
+    (existing) refreshes the underlying data."""
+
+    required_permissions = {"get": "numbers.view"}
+
+    def get(self, request: Request, *args: Any, **kwargs: Any) -> Response:
+        now = timezone.now()
+        org = self.organization
+        accounts = list(
+            self.restrict_to_businesses(
+                WhatsAppBusinessAccount.objects.for_organization(org).select_related("business"),
+                "business",
+            ).order_by("created_at")
+        )
+        numbers = list(
+            self.restrict_to_businesses(
+                WhatsAppPhoneNumber.objects.for_organization(org).select_related(
+                    "business", "business_account"
+                ),
+                "business",
+            ).order_by("created_at")
+        )
+        recent = self._recent_delivery(numbers, now)
+
+        account_rows = []
+        assessments: list[health.Assessment] = []
+        for waba in accounts:
+            result = health.assess_account(waba, now=now)
+            assessments.append(result)
+            account_rows.append(
+                {
+                    "id": str(waba.pk),
+                    "name": waba.name,
+                    "business_id": str(waba.business_id),
+                    "business_name": waba.business.name,
+                    "overall": result.overall,
+                    "last_checked_at": waba.last_verified_at,
+                    "checks": [health.as_dict(c) for c in result.checks],
+                }
+            )
+        number_rows = []
+        for phone in numbers:
+            result = health.assess_number(
+                phone, now=now, recent=recent.get(phone.pk, health.RecentDelivery())
+            )
+            assessments.append(result)
+            number_rows.append(
+                {
+                    "id": str(phone.pk),
+                    "label": phone.label,
+                    "display_phone_number": phone.display_phone_number,
+                    "verified_name": phone.verified_name,
+                    "business_id": str(phone.business_id),
+                    "business_name": phone.business.name,
+                    "business_account_id": str(phone.business_account_id),
+                    "overall": result.overall,
+                    "last_checked_at": phone.last_synced_at,
+                    "checks": [health.as_dict(c) for c in result.checks],
+                }
+            )
+
+        overall, summary = health.summarize(assessments)
+        alerts = (
+            self.restrict_to_businesses(
+                WhatsAppAccountEvent.objects.for_organization(org).select_related("business"),
+                "business",
+            )
+            .filter(
+                severity__in=[
+                    WhatsAppAccountEvent.Severity.WARNING,
+                    WhatsAppAccountEvent.Severity.CRITICAL,
+                ],
+                occurred_at__gte=now - timedelta(days=14),
+            )
+            .order_by("-occurred_at")[:5]
+        )
+        return Response(
+            {
+                "generated_at": now,
+                "overall": overall,
+                "summary": summary,
+                "accounts": account_rows,
+                "numbers": number_rows,
+                "recent_alerts": [
+                    {
+                        "id": str(e.pk),
+                        "severity": e.severity,
+                        "summary": e.summary,
+                        "occurred_at": e.occurred_at,
+                        "business_name": e.business.name if e.business_id else "",
+                    }
+                    for e in alerts
+                ],
+                "notes": [
+                    "Statuses are what Meta last reported to this console, not a live check. "
+                    "Use Refresh from Meta to read the current values.",
+                    "Rules marked “console” are this app's own thresholds, not Meta's.",
+                ],
+            }
+        )
+
+    def _recent_delivery(
+        self, numbers: list[WhatsAppPhoneNumber], now: Any
+    ) -> dict[Any, health.RecentDelivery]:
+        from apps.messaging.models import Message
+
+        if not numbers:
+            return {}
+        since = now - health.RECENT_WINDOW
+        base = Message.objects.for_organization(self.organization).filter(
+            direction="outbound",
+            created_at__gte=since,
+            phone_number_id__in=[n.pk for n in numbers],
+        )
+        totals = {
+            row["phone_number_id"]: (row["total"], row["failed"])
+            for row in base.values("phone_number_id").annotate(
+                total=Count("id"), failed=Count("id", filter=Q(status=MessageStatus.FAILED))
+            )
+        }
+        causes: dict[Any, dict[str, int]] = {}
+        for row in (
+            base.filter(status=MessageStatus.FAILED)
+            .values("phone_number_id", "error_code", "error_details__provider_code")
+            .annotate(n=Count("id"))
+        ):
+            category = failure_categories.categorize(
+                row["error_code"], {"provider_code": row["error_details__provider_code"]}
+            )
+            bucket = causes.setdefault(row["phone_number_id"], {})
+            bucket[category] = bucket.get(category, 0) + row["n"]
+        return {
+            pk: health.RecentDelivery(
+                total=total,
+                failed=failed,
+                causes=tuple(sorted(causes.get(pk, {}).items(), key=lambda kv: -kv[1])),
+            )
+            for pk, (total, failed) in totals.items()
+        }
