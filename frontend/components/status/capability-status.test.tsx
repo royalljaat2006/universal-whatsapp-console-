@@ -20,7 +20,9 @@ describe("feature registry", () => {
     }
     expect(FEATURE_SECTIONS.filter((s) => s.live).map((s) => s.href)).toEqual([
       "/",
+      "/setup",
       "/inbox",
+      "/failed-messages",
       "/contacts",
       "/templates",
       "/campaigns",

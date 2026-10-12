@@ -17,8 +17,10 @@ import { toApiError } from "@/lib/format";
 import { eventService } from "@/services/access";
 import { whatsappService } from "@/services/whatsapp";
 import { useSession } from "@/stores/session-context";
+import { useUiMode } from "@/stores/ui-mode";
 import type { BusinessAccount, PhoneNumber } from "@/types/api";
 
+import { HealthPanel } from "../health/health-panel";
 import { EmbeddedSignupButton } from "./embedded-signup-button";
 
 function when(value: string | null): string {
@@ -33,6 +35,7 @@ function mask(display: string): string {
 /** WhatsApp Business Accounts and numbers of the selected business, as synced from Meta. */
 export function NumbersView() {
   const { business, hasPermission } = useSession();
+  const { isSimple } = useUiMode();
   const toast = useToast();
   const [q, setQ] = useState("");
   const [status, setStatus] = useState("");
@@ -100,7 +103,11 @@ export function NumbersView() {
     <div className="flex flex-col gap-5">
       <PageHeader
         title="WhatsApp numbers"
-        description={`Numbers and WhatsApp Business Accounts connected to ${business.name}. Data comes from Meta's sync.`}
+        description={
+          isSimple
+            ? `Your WhatsApp numbers for ${business.name}, and whether they are healthy.`
+            : `Numbers and WhatsApp Business Accounts connected to ${business.name}. Data comes from Meta's sync.`
+        }
         actions={
           <>
             <Button variant="outline" size="sm" onClick={refresh}>
@@ -135,7 +142,9 @@ export function NumbersView() {
         </Panel>
       ) : null}
 
-      {accountList.length ? (
+      {accountList.length ? <HealthPanel key={business.id} /> : null}
+
+      {accountList.length && !isSimple ? (
         <Panel title="WhatsApp Business Accounts" bodyClassName="divide-y">
           {accountList.map((a) => (
             <div key={a.id} className="flex flex-wrap items-center gap-x-6 gap-y-2 px-4 py-3">
@@ -194,13 +203,13 @@ export function NumbersView() {
               <TableHeader>
                 <TableRow>
                   <TableHead>Number</TableHead>
-                  <TableHead className="hidden lg:table-cell">Business</TableHead>
-                  <TableHead>WABA</TableHead>
-                  <TableHead>Connection</TableHead>
+                  {!isSimple ? <TableHead className="hidden lg:table-cell">Business</TableHead> : null}
+                  {!isSimple ? <TableHead>WABA</TableHead> : null}
+                  {!isSimple ? <TableHead>Connection</TableHead> : null}
                   <TableHead>Status</TableHead>
                   <TableHead>Quality</TableHead>
-                  <TableHead className="hidden md:table-cell">Messaging limit</TableHead>
-                  <TableHead className="hidden xl:table-cell">Last sync</TableHead>
+                  {!isSimple ? <TableHead className="hidden md:table-cell">Messaging limit</TableHead> : null}
+                  {!isSimple ? <TableHead className="hidden xl:table-cell">Last sync</TableHead> : null}
                   <TableHead className="text-right">
                     <span className="sr-only">Actions</span>
                   </TableHead>
@@ -213,16 +222,20 @@ export function NumbersView() {
                       <span className="font-medium tabular-nums">{n.display_phone_number}</span>
                       <span className="text-caption block">{n.label || n.verified_name || "—"}</span>
                     </TableCell>
-                    <TableCell className="hidden lg:table-cell">{business.name}</TableCell>
-                    <TableCell>
-                      <span className="block max-w-44 truncate">{n.business_account_name || "—"}</span>
-                      <span className="text-caption font-mono">{n.business_account_external_id}</span>
-                    </TableCell>
-                    <TableCell>
-                      <StatusBadge tone={toneFor(n.business_account_connection_state)}>
-                        {n.business_account_connection_state}
-                      </StatusBadge>
-                    </TableCell>
+                    {!isSimple ? (
+                      <>
+                        <TableCell className="hidden lg:table-cell">{business.name}</TableCell>
+                        <TableCell>
+                          <span className="block max-w-44 truncate">{n.business_account_name || "—"}</span>
+                          <span className="text-caption font-mono">{n.business_account_external_id}</span>
+                        </TableCell>
+                        <TableCell>
+                          <StatusBadge tone={toneFor(n.business_account_connection_state)}>
+                            {n.business_account_connection_state}
+                          </StatusBadge>
+                        </TableCell>
+                      </>
+                    ) : null}
                     <TableCell>
                       <StatusBadge tone={toneFor(n.status)}>{n.status}</StatusBadge>
                     </TableCell>
@@ -233,12 +246,16 @@ export function NumbersView() {
                         <span className="text-caption">Not reported</span>
                       )}
                     </TableCell>
-                    <TableCell className="hidden md:table-cell">
-                      {n.messaging_limit_tier || "Not reported"}
-                    </TableCell>
-                    <TableCell className="text-caption hidden xl:table-cell">
-                      {when(n.last_synced_at)}
-                    </TableCell>
+                    {!isSimple ? (
+                      <>
+                        <TableCell className="hidden md:table-cell">
+                          {n.messaging_limit_tier || "Not reported"}
+                        </TableCell>
+                        <TableCell className="text-caption hidden xl:table-cell">
+                          {when(n.last_synced_at)}
+                        </TableCell>
+                      </>
+                    ) : null}
                     <TableCell className="text-right">
                       <Button
                         variant="ghost"
@@ -259,6 +276,7 @@ export function NumbersView() {
         </Panel>
       ) : null}
 
+      {!isSimple ? (
       <Panel
         title="Account events"
         description="Quality, messaging-limit, alert and account-update webhooks received from Meta."
@@ -299,6 +317,7 @@ export function NumbersView() {
           </ul>
         ) : null}
       </Panel>
+      ) : null}
 
       <Sheet open={selected !== null} onOpenChange={(open) => !open && setSelected(null)}>
         <SheetContent className="w-full sm:max-w-md">
@@ -322,6 +341,9 @@ export function NumbersView() {
                     { label: "Business", value: business.name },
                     { label: "Display name", value: selected.verified_name || "—" },
                     { label: "Label", value: selected.label || "—" },
+                    ...(isSimple
+                      ? []
+                      : [
                     {
                       label: "Phone number ID",
                       value: <span className="font-mono text-xs">{selected.external_id}</span>,
@@ -341,9 +363,10 @@ export function NumbersView() {
                     },
                     { label: "Provider status", value: selected.provider_status || "—" },
                     { label: "Name review", value: selected.name_status || "—" },
-                    { label: "Quality", value: selected.quality_rating || "Not reported" },
                     { label: "Messaging limit", value: selected.messaging_limit_tier || "Not reported" },
-                    { label: "Last sync", value: when(selected.last_synced_at) },
+                        ]),
+                    { label: "Quality", value: selected.quality_rating || "Not reported" },
+                    { label: "Last checked with Meta", value: when(selected.last_synced_at) },
                   ]}
                 />
                 {selected.last_error ? (

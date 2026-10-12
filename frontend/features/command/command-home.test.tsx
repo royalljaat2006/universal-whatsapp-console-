@@ -1,7 +1,8 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ApiError } from "@/lib/api/errors";
+import { UiModeProvider, resetModeForTests, writeStoredMode } from "@/stores/ui-mode";
 
 import { CommandHome } from "./command-home";
 
@@ -22,6 +23,8 @@ vi.mock("../overview/overview-view", () => ({ OverviewView: () => <div>overview 
 
 const overview = vi.fn();
 const failures = vi.fn();
+const recoveryFailures = vi.fn();
+const recoveryRetry = vi.fn();
 const campaignList = vi.fn();
 const campaignPreview = vi.fn();
 const campaignLaunch = vi.fn();
@@ -30,6 +33,12 @@ vi.mock("@/services/analytics", () => ({
   analyticsService: {
     overview: (...a: unknown[]) => overview(...a),
     failures: (...a: unknown[]) => failures(...a),
+  },
+}));
+vi.mock("@/services/recovery", () => ({
+  recoveryService: {
+    failures: (...a: unknown[]) => recoveryFailures(...a),
+    retry: (...a: unknown[]) => recoveryRetry(...a),
   },
 }));
 vi.mock("@/services/campaigns", () => ({
@@ -42,12 +51,17 @@ vi.mock("@/services/campaigns", () => ({
 }));
 vi.mock("@/services/templates", () => ({
   templateService: { list: vi.fn().mockResolvedValue({ results: [], next: null }) },
+  templateStudioService: { drafts: (...a: unknown[]) => studioDrafts(...a) },
 }));
 vi.mock("@/services/inbox", () => ({
   inboxService: { conversations: vi.fn().mockResolvedValue({ results: [], next: null }) },
 }));
 vi.mock("@/services/whatsapp", () => ({
-  whatsappService: { numbers: vi.fn().mockResolvedValue({ results: [], next: null }) },
+  whatsappService: {
+    numbers: vi.fn().mockResolvedValue({ results: [], next: null }),
+    health: (...a: unknown[]) => healthFn(...a),
+    setup: (...a: unknown[]) => setupFn(...a),
+  },
 }));
 vi.mock("@/services/contacts", () => ({
   contactService: { list: vi.fn().mockResolvedValue({ results: [], next: null }) },
@@ -71,6 +85,73 @@ const CAMPAIGN = {
   audience_count: 120,
 };
 
+const healthFn = vi.fn();
+const setupFn = vi.fn();
+const studioDrafts = vi.fn();
+
+const check = (over: Record<string, unknown>) => ({
+  code: "quality",
+  state: "ok",
+  title: "Quality is high",
+  detail: "d",
+  next_step: "",
+  fix_in: "none",
+  basis: "provider",
+  action: "",
+  ...over,
+});
+
+const HEALTHY = {
+  generated_at: "2026-10-12T10:00:00Z",
+  overall: "healthy",
+  summary: "Everything Meta has reported looks healthy.",
+  accounts: [],
+  numbers: [
+    {
+      id: "n1",
+      label: "Support line",
+      display_phone_number: "+91 90000 00001",
+      verified_name: "",
+      business_id: "b1",
+      business_name: "Kiosk",
+      business_account_id: "a1",
+      overall: "healthy",
+      last_checked_at: "2026-10-12T09:59:00Z",
+      checks: [check({})],
+    },
+  ],
+  recent_alerts: [],
+  notes: ["Statuses are what Meta last reported to this console, not a live check."],
+};
+
+const RED = {
+  ...HEALTHY,
+  overall: "problem",
+  summary: "1 thing needs fixing.",
+  numbers: [
+    {
+      ...HEALTHY.numbers[0],
+      overall: "problem",
+      checks: [
+        check({
+          state: "problem",
+          title: "Quality is low",
+          next_step: "Pause marketing sends and review who you message.",
+          fix_in: "meta",
+        }),
+      ],
+    },
+  ],
+};
+
+function renderHome() {
+  return render(
+    <UiModeProvider>
+      <CommandHome />
+    </UiModeProvider>,
+  );
+}
+
 function ask(text: string) {
   fireEvent.change(screen.getByLabelText("Type a command or a question"), { target: { value: text } });
   fireEvent.click(screen.getByRole("button", { name: /Run/ }));
@@ -78,7 +159,10 @@ function ask(text: string) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  resetModeForTests();
+  window.localStorage.clear();
   permissions.clear();
+  healthFn.mockResolvedValue(HEALTHY);
   [
     "analytics.view",
     "campaigns.view",
@@ -94,7 +178,7 @@ beforeEach(() => {
 
 describe("CommandHome", () => {
   it("answers a delivery question from the real analytics call", async () => {
-    render(<CommandHome />);
+    renderHome();
     ask("Show today's message delivery performance");
     expect(await screen.findByRole("heading", { name: "Delivery performance today" })).toBeInTheDocument();
     expect(screen.getByText("90.0%")).toBeInTheDocument();
@@ -102,7 +186,7 @@ describe("CommandHome", () => {
   });
 
   it("refuses an unsupported request honestly and calls nothing", async () => {
-    render(<CommandHome />);
+    renderHome();
     ask("delete all my contacts");
     expect(await screen.findByRole("heading", { name: "I can't do that from here" })).toBeInTheDocument();
     expect(screen.getByText(/Nothing was changed/)).toBeInTheDocument();
@@ -112,29 +196,199 @@ describe("CommandHome", () => {
 
   it("explains missing permission instead of calling the API", async () => {
     permissions.delete("analytics.view");
-    render(<CommandHome />);
+    permissions.delete("conversations.view");
+    renderHome();
     ask("Find messages that failed");
     expect(await screen.findByRole("heading", { name: "You don't have access to that" })).toBeInTheDocument();
     expect(failures).not.toHaveBeenCalled();
+    expect(recoveryFailures).not.toHaveBeenCalled();
   });
 
   it("shows an honest empty state, not zeros, when there is no data", async () => {
     overview.mockResolvedValue({ ...OVERVIEW, has_data: false });
-    render(<CommandHome />);
+    renderHome();
     ask("delivery performance");
     expect(await screen.findByRole("heading", { name: "No message activity today" })).toBeInTheDocument();
     expect(screen.queryByText("0.0%")).not.toBeInTheDocument();
   });
 
   it("surfaces a server error with a retry that re-runs the same command", async () => {
-    failures.mockRejectedValueOnce(new ApiError(403, "PERMISSION_DENIED", "You do not have permission."));
-    render(<CommandHome />);
+    recoveryFailures.mockRejectedValueOnce(
+      new ApiError(403, "PERMISSION_DENIED", "You do not have permission."),
+    );
+    renderHome();
     ask("failed messages");
     expect(await screen.findByRole("alert")).toHaveTextContent("You do not have permission.");
-    failures.mockResolvedValueOnce({ total: 0, groups: [], recent: [] });
+    recoveryFailures.mockResolvedValueOnce({ total: 0, shown: 0, kinds: {}, results: [] });
     fireEvent.click(screen.getByRole("button", { name: /retry|try again/i }));
-    expect(await screen.findByRole("heading", { name: "No failed messages today" })).toBeInTheDocument();
-    expect(failures).toHaveBeenCalledTimes(2);
+    expect(await screen.findByRole("heading", { name: "No failed messages in the last 24 hours" })).toBeInTheDocument();
+    expect(recoveryFailures).toHaveBeenCalledTimes(2);
+  });
+
+  describe("template studio", () => {
+    it("points to the studio, lists real drafts, and creates or submits nothing", async () => {
+      permissions.add("templates.manage");
+      studioDrafts.mockResolvedValue({
+        results: [
+          {
+            id: "d1",
+            name: "order_shipped",
+            language: "en_US",
+            status: "draft",
+            guidance: { state: "draft", explanation: "This is a draft." },
+          },
+          {
+            id: "d2",
+            name: "festive_offer",
+            language: "en_US",
+            status: "submitted",
+            guidance: { state: "pending", explanation: "Meta is reviewing this template." },
+          },
+        ],
+      });
+      renderHome();
+      ask("I want to create a new template");
+      expect(await screen.findByRole("heading", { name: "Write a template in the Template Studio" })).toBeInTheDocument();
+      expect(screen.getByText("Draft: not sent to Meta")).toBeInTheDocument();
+      expect(screen.getByText("Meta is reviewing this template.")).toBeInTheDocument();
+      expect(screen.getByRole("link", { name: "Open the Template Studio" })).toHaveAttribute("href", "/templates?new=1");
+      expect(screen.getByText(/not approved until Meta says so/)).toBeInTheDocument();
+    });
+
+    it("explains missing permission instead of calling the API", async () => {
+      permissions.delete("templates.manage");
+      renderHome();
+      ask("create a template");
+      expect(await screen.findByRole("heading", { name: "You don't have access to that" })).toBeInTheDocument();
+      expect(studioDrafts).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("setup and test message", () => {
+    const step = (id: string, state: string, over: Record<string, unknown> = {}) => ({
+      id,
+      title: `Title ${id}`,
+      state,
+      detail: `Detail ${id}`,
+      next_step: "",
+      fix_in: "none",
+      action: "",
+      evidence: {},
+      ...over,
+    });
+
+    it("answers from the real setup status and lists only what is not done", async () => {
+      permissions.add("numbers.manage");
+      setupFn.mockResolvedValue({
+        overall: "in_progress",
+        summary: "Next: a test message that really arrives.",
+        steps: [step("connection", "verified"), step("test_message", "pending", { next_step: "Preview a test message." })],
+      });
+      renderHome();
+      ask("Is my WhatsApp set up and ready?");
+      expect(await screen.findByRole("heading", { name: "WhatsApp setup isn't finished" })).toBeInTheDocument();
+      expect(screen.getByText("Title test_message")).toBeInTheDocument();
+      expect(screen.queryByText("Title connection")).not.toBeInTheDocument();
+      expect(screen.getByRole("link", { name: "Open Set up WhatsApp" })).toHaveAttribute("href", "/setup");
+    });
+
+    it("says it is set up only when the server says ready", async () => {
+      setupFn.mockResolvedValue({
+        overall: "ready",
+        summary: "WhatsApp is set up and a test message arrived.",
+        steps: [step("connection", "verified")],
+      });
+      renderHome();
+      ask("is whatsapp set up");
+      expect(await screen.findByRole("heading", { name: "WhatsApp is set up" })).toBeInTheDocument();
+    });
+
+    it("a test-message request only points to the preview-and-approve page and sends nothing", async () => {
+      permissions.add("messages.send");
+      renderHome();
+      ask("I want to send a test message");
+      expect(await screen.findByRole("heading", { name: "Send a test message from the Set up page" })).toBeInTheDocument();
+      expect(screen.getByText(/Nothing is sent from this box/)).toBeInTheDocument();
+      expect(setupFn).not.toHaveBeenCalled();
+    });
+
+    it("explains missing permission instead of calling the API", async () => {
+      permissions.delete("numbers.view");
+      renderHome();
+      ask("set up whatsapp");
+      expect(await screen.findByRole("heading", { name: "You don't have access to that" })).toBeInTheDocument();
+      expect(setupFn).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("failed messages and recovery", () => {
+    const row = (over: Record<string, unknown>, recovery: Record<string, unknown>) => ({
+      id: "m1",
+      conversation_id: "c1",
+      business_id: "b1",
+      message_type: "text",
+      status: "failed",
+      preview: "Your order shipped",
+      occurred_at: "2026-10-12T08:00:00Z",
+      failed_at: "2026-10-12T08:00:05Z",
+      recipient: { name: "Asha", phone_number: "919876543210" },
+      from_number: "+91 90000 11111",
+      recovery: {
+        category: "rate_limit",
+        label: "Rate limit",
+        kind: "retryable",
+        explanation: "x",
+        next_step: "Retry it now.",
+        provider_code: "131056",
+        safe_error: "Too many messages",
+        can_retry: true,
+        blockers: [],
+        links: [],
+        retried_as: null,
+        ...recovery,
+      },
+      ...over,
+    });
+
+    it("lists real failures with each next step and never offers a retry from the command box", async () => {
+      recoveryFailures.mockResolvedValue({
+        total: 2,
+        shown: 2,
+        kinds: { retryable: 1, not_retryable: 1 },
+        results: [
+          row({}, {}),
+          row(
+            { id: "m2", recipient: { name: "", phone_number: "919811111111" } },
+            {
+              category: "invalid_recipient",
+              label: "Invalid recipient",
+              kind: "not_retryable",
+              next_step: "Check the contact's number.",
+              can_retry: false,
+            },
+          ),
+        ],
+      });
+      renderHome();
+      ask("Find messages that failed this week");
+      expect(await screen.findByRole("heading", { name: "Failed messages in the last 7 days" })).toBeInTheDocument();
+      expect(recoveryFailures).toHaveBeenCalledWith({ days: 7, limit: 5 });
+      expect(screen.getByText(/Rate limit: Retry it now\./)).toBeInTheDocument();
+      expect(screen.getByText(/Invalid recipient: Check the contact's number\./)).toBeInTheDocument();
+      expect(screen.getAllByText("Safe to retry").length).toBeGreaterThan(0);
+      expect(screen.getByRole("link", { name: "Open failed messages" })).toHaveAttribute("href", "/failed-messages");
+      expect(recoveryRetry).not.toHaveBeenCalled();
+      expect(failures).not.toHaveBeenCalled();
+    });
+
+    it("falls back to the analytics summary for someone who cannot see conversations", async () => {
+      permissions.delete("conversations.view");
+      failures.mockResolvedValue({ total: 0, groups: [], recent: [] });
+      renderHome();
+      ask("failed messages this week");
+      expect(await screen.findByRole("heading", { name: "No failed messages in the last 7 days" })).toBeInTheDocument();
+      expect(recoveryFailures).not.toHaveBeenCalled();
+    });
   });
 
   describe("launching a campaign", () => {
@@ -155,7 +409,7 @@ describe("CommandHome", () => {
     });
 
     it("shows the server's preview and does NOT launch until confirmed", async () => {
-      render(<CommandHome />);
+      renderHome();
       ask("launch campaign Spring Sale");
       expect(await screen.findByRole("heading", { name: "Launch “Spring Sale”?" })).toBeInTheDocument();
       expect(screen.getByText("Recipients: 120")).toBeInTheDocument();
@@ -164,7 +418,7 @@ describe("CommandHome", () => {
     });
 
     it("cancelling never launches", async () => {
-      render(<CommandHome />);
+      renderHome();
       ask("launch campaign Spring Sale");
       await screen.findByRole("heading", { name: "Launch “Spring Sale”?" });
       fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
@@ -173,7 +427,7 @@ describe("CommandHome", () => {
     });
 
     it("launches exactly once on confirm and reports the real result", async () => {
-      render(<CommandHome />);
+      renderHome();
       ask("launch campaign Spring Sale");
       fireEvent.click(await screen.findByRole("button", { name: "Launch campaign" }));
       expect(await screen.findByRole("heading", { name: "“Spring Sale” launched" })).toBeInTheDocument();
@@ -189,7 +443,7 @@ describe("CommandHome", () => {
         ],
         summary: { recipients: 120 },
       });
-      render(<CommandHome />);
+      renderHome();
       ask("launch campaign Spring Sale");
       const button = await screen.findByRole("button", { name: "Launch campaign" });
       expect(button).toBeDisabled();
@@ -198,7 +452,7 @@ describe("CommandHome", () => {
 
     it("keeps the preview and shows the error when the launch call fails", async () => {
       campaignLaunch.mockRejectedValueOnce(new ApiError(409, "CONFLICT", "Campaign already launched."));
-      render(<CommandHome />);
+      renderHome();
       ask("launch campaign Spring Sale");
       fireEvent.click(await screen.findByRole("button", { name: "Launch campaign" }));
       await waitFor(() => expect(screen.getByText("Campaign already launched.")).toBeInTheDocument());
@@ -207,7 +461,7 @@ describe("CommandHome", () => {
 
     it("needs the launch permission before it even previews", async () => {
       permissions.delete("campaigns.launch");
-      render(<CommandHome />);
+      renderHome();
       ask("launch campaign Spring Sale");
       expect(
         await screen.findByRole("heading", { name: "You don't have access to that" }),
@@ -221,7 +475,7 @@ describe("CommandHome", () => {
         results: [CAMPAIGN, { ...CAMPAIGN, id: "c2", name: "Spring Sale 2" }],
         next: null,
       });
-      render(<CommandHome />);
+      renderHome();
       ask("launch campaign Spring");
       expect(await screen.findByRole("heading", { name: "Which campaign do you mean?" })).toBeInTheDocument();
       expect(campaignLaunch).not.toHaveBeenCalled();
@@ -236,9 +490,76 @@ describe("CommandHome", () => {
       ],
       next: null,
     });
-    render(<CommandHome />);
+    renderHome();
     ask("Show campaigns currently running");
     expect(await screen.findByText("Live One")).toBeInTheDocument();
     expect(screen.queryByText("Draft One")).not.toBeInTheDocument();
+  });
+});
+
+describe("WhatsApp health in the command home", () => {
+  it("answers from the real health endpoint, with the fix and where to do it", async () => {
+    healthFn.mockResolvedValue(RED);
+    renderHome();
+    ask("Is everything healthy with my WhatsApp numbers?");
+    expect(await screen.findByRole("heading", { name: "WhatsApp health: Problem" })).toBeInTheDocument();
+    // The Home health card shows the same issue; look inside the command RESULT.
+    const result = within(screen.getByRole("region", { name: "WhatsApp health: Problem" }));
+    expect(result.getByText("Support line: Quality is low")).toBeInTheDocument();
+    expect(result.getByText("Pause marketing sends and review who you message.")).toBeInTheDocument();
+    expect(result.getByText("Fix in Meta's WhatsApp Manager")).toBeInTheDocument();
+    expect(result.getByText(/not a live check/)).toBeInTheDocument();
+  });
+
+  it("says plainly when nothing is connected instead of reporting health", async () => {
+    healthFn.mockResolvedValue({ ...HEALTHY, overall: "unknown", numbers: [], accounts: [] });
+    renderHome();
+    ask("any problems with my numbers");
+    expect(
+      await screen.findByRole("heading", { name: "No WhatsApp number is connected yet" }),
+    ).toBeInTheDocument();
+  });
+
+  it("is refused clearly without the numbers permission, and never calls the API", async () => {
+    permissions.delete("numbers.view");
+    healthFn.mockClear();
+    renderHome();
+    ask("check whatsapp health");
+    expect(await screen.findByRole("heading", { name: "You don't have access to that" })).toBeInTheDocument();
+    expect(healthFn).not.toHaveBeenCalled();
+  });
+
+  it("offers a health suggestion only when real data shows something needs attention", async () => {
+    healthFn.mockResolvedValue(RED);
+    renderHome();
+    expect(await screen.findByRole("button", { name: /Check WhatsApp health/ })).toBeInTheDocument();
+  });
+
+  it("does not offer that suggestion when everything is healthy", async () => {
+    renderHome();
+    await screen.findByText("Everything Meta has reported looks healthy.");
+    expect(screen.queryByRole("button", { name: /Check WhatsApp health/ })).not.toBeInTheDocument();
+  });
+
+  it("shows the health card on Home with the plain summary", async () => {
+    healthFn.mockResolvedValue(RED);
+    renderHome();
+    expect(await screen.findByRole("region", { name: "WhatsApp health" })).toHaveTextContent(
+      "1 thing needs fixing.",
+    );
+  });
+});
+
+describe("Simple and Advanced mode on the home screen", () => {
+  it("simple mode hides the dense business-overview disclosure", async () => {
+    renderHome();
+    await screen.findByText("Everything Meta has reported looks healthy.");
+    expect(screen.queryByRole("button", { name: "Business overview" })).not.toBeInTheDocument();
+  });
+
+  it("advanced mode brings it back", async () => {
+    writeStoredMode("advanced");
+    renderHome();
+    expect(await screen.findByRole("button", { name: "Business overview" })).toBeInTheDocument();
   });
 });

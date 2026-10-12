@@ -81,7 +81,7 @@ export function EmbeddedSignupButton({
   const toast = useToast();
   const [configured, setConfigured] = useState<boolean | null>(null);
   const [connecting, setConnecting] = useState(false);
-  const pending = useRef<{ waba_id?: string; phone_number_id?: string; code?: string }>({});
+  const pending = useRef<{ waba_id?: string; phone_number_id?: string; code?: string; state?: string }>({});
   const submitted = useRef(false);
 
   useEffect(() => {
@@ -118,11 +118,17 @@ export function EmbeddedSignupButton({
   }, []);
 
   async function tryComplete() {
-    const { waba_id, phone_number_id, code } = pending.current;
-    if (!waba_id || !phone_number_id || !code || submitted.current) return;
+    const { waba_id, phone_number_id, code, state } = pending.current;
+    if (!waba_id || !phone_number_id || !code || !state || submitted.current) return;
     submitted.current = true;
     try {
-      await whatsappService.completeEmbeddedSignup({ business_id: businessId, waba_id, phone_number_id, code });
+      await whatsappService.completeEmbeddedSignup({
+        business_id: businessId,
+        waba_id,
+        phone_number_id,
+        code,
+        state,
+      });
       toast.success("WhatsApp connecting", "Verifying and syncing numbers — this finishes in the background.");
       onConnected();
     } catch (cause) {
@@ -151,6 +157,8 @@ export function EmbeddedSignupButton({
         setConnecting(false);
         return;
       }
+      // One-time state, issued by our server for this user and business before Meta's dialog opens.
+      pending.current.state = (await whatsappService.embeddedSignupSession(businessId)).state;
       FB.init({ appId: config.app_id, version: config.graph_api_version, xfbml: true });
       FB.login(
         (response) => {

@@ -95,6 +95,31 @@ export function parseCommand(input: string): ParsedCommand {
     ) ?? /^(inbox|contacts|analytics|numbers|notifications|settings|overview|home)$/.exec(t);
   if (nav) return make("navigate", text, t, { href: NAVIGATION_TARGETS[nav[1]] });
 
+  // Setup and test-message requests are answered with where to go: a real send needs
+  // the preview and a separate approval on the Set up page, never the command box.
+  // Checked before the unsupported-verb rule so "send a test message" is not just refused.
+  if (/\b(test message|test send|send (me |us )?(a )?test)\b/.test(t)) {
+    return make("test_message", text, t);
+  }
+  if (
+    /\b(set ?up|onboarding|get started|getting started|finish setup|am i (ready|set up)|is whatsapp (set up|ready|connected))\b|\bconnect (my )?(whatsapp|account|number)\b/.test(
+      t,
+    )
+  ) {
+    return make("setup", text, t);
+  }
+
+  // Writing a template: pointed at the Template Studio, which checks it and needs explicit
+  // confirmation before anything goes to Meta. Never created or submitted from the command box.
+  if (
+    /\b(create|make|write|draft|build|add|new|submit)\b.*\btemplates?\b|\btemplates?\b.*\b(studio|draft|drafts)\b|\bnew template\b/.test(
+      t,
+    ) &&
+    !/\b(delete|remove|rename|edit|approve|approved)\b/.test(t)
+  ) {
+    return make("template_studio", text, t);
+  }
+
   if (UNSUPPORTED_ACTION.test(t)) {
     return make("unsupported", text, t, {
       reason:
@@ -124,6 +149,13 @@ export function parseCommand(input: string): ParsedCommand {
     }
     return make("search", text, t, { subject: stripWords(t, /\b(show|find|list|the|my|all|templates?)\b/g) });
   }
+  if (
+    /\b(health|healthy|unhealthy|any (problems?|issues?)|is everything (ok|okay|fine|working)|is whatsapp (ok|okay|fine|working)|numbers? (ok|okay|fine|working|connected|healthy)|quality (rating|score)|connection (status|problems?|issues?))\b/.test(
+      t,
+    )
+  ) {
+    return make("health", text, t);
+  }
   if (/\b(unread|waiting|awaiting|unanswered|need(s)? (a )?repl(y|ies))\b/.test(t)) {
     return make("unread", text, t);
   }
@@ -149,6 +181,10 @@ export const SUPPORTED_EXAMPLES: string[] = [
   "Find templates that need attention",
   "Compare messaging costs across my businesses",
   "Show unread conversations",
+  "Is everything healthy with my WhatsApp numbers?",
+  "Is my WhatsApp set up and ready?",
+  "I want to send a test message",
+  "I want to create a new template",
   "Launch campaign <name>",
   "Pause campaign <name>",
   "Find <contact name or phone number>",

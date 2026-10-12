@@ -16,6 +16,24 @@ describe("parseCommand", () => {
     ["Compare messaging costs for my selected businesses", "costs"],
     ["how much did we spend yesterday", "costs"],
     ["Show unread conversations", "unread"],
+    ["Is everything healthy with my WhatsApp numbers?", "health"],
+    ["any problems with my numbers", "health"],
+    ["check my number quality rating", "health"],
+    ["is whatsapp working", "health"],
+    ["connection status", "health"],
+    ["find templates with issues", "templates_attention"],
+    ["any failed messages", "failed_messages"],
+    ["Is my WhatsApp set up and ready?", "setup"],
+    ["help me get started", "setup"],
+    ["connect my whatsapp", "setup"],
+    ["onboarding status", "setup"],
+    ["I want to send a test message", "test_message"],
+    ["send a test message to my phone", "test_message"],
+    ["test message", "test_message"],
+    ["Which messages failed and can I retry them?", "failed_messages"],
+    ["why did my message fail", "failed_messages"],
+    ["retry all failed messages", "failed_messages"],
+    ["how is delivery going", "performance"],
   ])("%s -> %s", (input, intent) => {
     expect(parseCommand(input).intent).toBe(intent);
   });
@@ -58,7 +76,6 @@ describe("parseCommand", () => {
   it.each([
     "delete all contacts",
     "send a message to Asha",
-    "create a new template",
     "invite bob@example.com",
     "export my contacts",
     "reply to the last customer",
@@ -76,6 +93,28 @@ describe("parseCommand", () => {
       fallbackSearch: true,
     });
     expect(parseCommand("find 919876543210")).toMatchObject({ intent: "search", subject: "919876543210" });
+  });
+
+  it("writing a template goes to the Template Studio; changing or removing one is still refused", () => {
+    for (const input of [
+      "create a new template",
+      "I want to write a template for order updates",
+      "draft a template",
+      "new template",
+      "open the template studio",
+    ]) {
+      expect(parseCommand(input).intent).toBe("template_studio");
+    }
+    for (const input of ["delete the template order_shipped", "edit template welcome", "approve my template"]) {
+      expect(parseCommand(input).intent).not.toBe("template_studio");
+    }
+  });
+
+  it("a test-message request is never parsed as a send, and other sends are still refused", () => {
+    expect(parseCommand("send a test message").intent).toBe("test_message");
+    expect(parseCommand("send a message to Asha").intent).toBe("unsupported");
+    expect(parseCommand("connect all numbers").intent).toBe("unsupported");
+    expect(parseCommand("disconnect my whatsapp").intent).toBe("unsupported");
   });
 
   it("rejects empty or too-short input", () => {

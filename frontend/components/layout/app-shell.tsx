@@ -15,10 +15,11 @@ import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { PageSkeleton } from "@/components/ui/states";
 import { ToastProvider } from "@/components/ui/toast";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { FEATURE_SECTIONS, sectionForPath } from "@/features/registry";
+import { labelFor, sectionForPath, visibleSections } from "@/features/registry";
 import { emitSearch } from "@/lib/global-search";
 import { cn } from "@/lib/utils";
 import { useSession } from "@/stores/session-context";
+import { useUiMode } from "@/stores/ui-mode";
 
 const COLLAPSE_KEY = "wp.sidebar.collapsed";
 
@@ -34,7 +35,8 @@ function Navigation({ collapsed, onNavigate }: { collapsed: boolean; onNavigate?
   const pathname = usePathname();
   const { hasPermission } = useSession();
   const current = sectionForPath(pathname);
-  const items = FEATURE_SECTIONS.filter((s) => s.live && hasPermission(s.permission));
+  const { mode } = useUiMode();
+  const items = visibleSections(mode, hasPermission);
   return (
     <nav aria-label="Main" className="flex flex-col gap-0.5">
       {items.map((section) => {
@@ -45,7 +47,7 @@ function Navigation({ collapsed, onNavigate }: { collapsed: boolean; onNavigate?
             href={section.href}
             onClick={onNavigate}
             aria-current={isActive ? "page" : undefined}
-            aria-label={collapsed ? section.label : undefined}
+            aria-label={collapsed ? labelFor(section, mode) : undefined}
             className={cn(
               "group/nav focus-visible:ring-ring/50 relative flex h-9 items-center gap-3 rounded-md px-2.5 text-[13px] font-medium transition-colors outline-none focus-visible:ring-2",
               isActive
@@ -64,13 +66,13 @@ function Navigation({ collapsed, onNavigate }: { collapsed: boolean; onNavigate?
                 isActive ? "text-primary" : "text-muted-foreground group-hover/nav:text-foreground",
               )}
             />
-            {collapsed ? null : <span className="truncate">{section.label}</span>}
+            {collapsed ? null : <span className="truncate">{labelFor(section, mode)}</span>}
           </Link>
         );
         return collapsed ? (
           <Tooltip key={section.href}>
             <TooltipTrigger render={<span className="block" />}>{link}</TooltipTrigger>
-            <TooltipContent side="right">{section.label}</TooltipContent>
+            <TooltipContent side="right">{labelFor(section, mode)}</TooltipContent>
           </Tooltip>
         ) : (
           <div key={section.href}>{link}</div>
@@ -134,6 +136,7 @@ function HeaderSearch() {
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const { user, active, business, loading } = useSession();
+  const { mode } = useUiMode();
   // The shell renders only after the client-side session load, so reading
   // the stored preference in the initializer cannot cause a hydration mismatch.
   const [collapsed, setCollapsed] = useState(() => typeof window !== "undefined" && readCollapsed());
@@ -218,7 +221,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 <MenuIcon aria-hidden />
               </Button>
               <div className="flex min-w-0 items-center gap-2">
-                <span className="text-sm font-semibold">{section?.label ?? ""}</span>
+                <span className="text-sm font-semibold">{section ? labelFor(section, mode) : ""}</span>
                 {business ? (
                   <span className="text-caption hidden items-center gap-1.5 truncate sm:flex">
                     <span aria-hidden>/</span>

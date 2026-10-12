@@ -5,10 +5,12 @@ import { EmbeddedSignupButton } from "./embedded-signup-button";
 
 const embeddedSignupConfig = vi.fn();
 const completeEmbeddedSignup = vi.fn();
+const embeddedSignupSession = vi.fn();
 vi.mock("@/services/whatsapp", () => ({
   whatsappService: {
     embeddedSignupConfig: (...args: unknown[]) => embeddedSignupConfig(...args),
     completeEmbeddedSignup: (...args: unknown[]) => completeEmbeddedSignup(...args),
+    embeddedSignupSession: (...args: unknown[]) => embeddedSignupSession(...args),
   },
 }));
 
@@ -42,6 +44,7 @@ describe("EmbeddedSignupButton", () => {
   beforeEach(() => {
     embeddedSignupConfig.mockReset().mockResolvedValue(CONFIG);
     completeEmbeddedSignup.mockReset();
+    embeddedSignupSession.mockReset().mockResolvedValue({ state: "server-state-1", expires_in: 900 });
     mockInit.mockReset();
     mockLogin.mockReset();
     window.FB = { init: mockInit, login: mockLogin };
@@ -79,6 +82,7 @@ describe("EmbeddedSignupButton", () => {
         waba_id: "waba-1",
         phone_number_id: "phone-1",
         code: "auth-code-1",
+        state: "server-state-1",
       }),
     );
     await waitFor(() => expect(onConnected).toHaveBeenCalledTimes(1));
@@ -104,6 +108,7 @@ describe("EmbeddedSignupButton", () => {
         waba_id: "waba-2",
         phone_number_id: "phone-2",
         code: "auth-code-2",
+        state: "server-state-1",
       }),
     );
     await waitFor(() => expect(onConnected).toHaveBeenCalledTimes(1));
@@ -121,5 +126,20 @@ describe("EmbeddedSignupButton", () => {
     expect(completeEmbeddedSignup).not.toHaveBeenCalled();
     expect(onConnected).not.toHaveBeenCalled();
     await waitFor(() => expect(screen.getByRole("button")).not.toHaveAttribute("aria-busy"));
+  });
+  it("asks the server for a one-time state for THIS business before opening Meta's dialog", async () => {
+    render(<EmbeddedSignupButton businessId="b9" onConnected={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button"));
+    await waitFor(() => expect(mockLogin).toHaveBeenCalledTimes(1));
+    expect(embeddedSignupSession).toHaveBeenCalledWith("b9");
+  });
+
+  it("does not open Meta's dialog if the server will not issue a state", async () => {
+    embeddedSignupSession.mockRejectedValueOnce(new Error("no"));
+    render(<EmbeddedSignupButton businessId="b9" onConnected={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button"));
+    await waitFor(() => expect(screen.getByRole("button")).not.toHaveAttribute("aria-busy"));
+    expect(mockLogin).not.toHaveBeenCalled();
+    expect(completeEmbeddedSignup).not.toHaveBeenCalled();
   });
 });

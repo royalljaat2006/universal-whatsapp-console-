@@ -48,7 +48,7 @@ export function OnboardingChecklist({ numbers }: { numbers: PhoneNumber[] | unde
       label: "Connect a WhatsApp number",
       description: "Connect a WhatsApp Business Account to start sending and receiving messages.",
       done: Boolean(numbers && numbers.length > 0),
-      href: "/numbers",
+      href: "/setup",
       cta: "Connect WhatsApp",
     });
   }

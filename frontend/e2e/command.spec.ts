@@ -60,13 +60,4 @@ test.describe("command home", () => {
     await ask(page, "open templates");
     await expect(page).toHaveURL(/\/templates/);
   });
-
-  test("the full console stays one click away behind the overview disclosure", async ({ page }) => {
-    await registerWithBusiness(page);
-    await page.getByRole("button", { name: "Business overview" }).click();
-    await expect(page.getByText("Messages today")).toBeVisible();
-    for (const link of ["Inbox", "Contacts", "Templates", "Campaigns", "Analytics"]) {
-      await expect(page.getByRole("link", { name: link, exact: true }).first()).toBeVisible();
-    }
-  });
 });

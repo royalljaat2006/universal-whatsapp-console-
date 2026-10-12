@@ -40,6 +40,62 @@ export interface MfaStatus {
   required_for_staff: boolean;
 }
 
+export type ConnectionHealthState = "ok" | "warning" | "problem" | "unknown";
+export type ConnectionHealthOverall = "healthy" | "attention" | "problem" | "unknown";
+
+export interface ConnectionHealthCheck {
+  code: string;
+  state: ConnectionHealthState;
+  title: string;
+  detail: string;
+  next_step: string;
+  /** Where this can be fixed: an action in this console, only in Meta's own tools, or nowhere. */
+  fix_in: "console" | "meta" | "none";
+  /** Whether the signal came from Meta or from this console's own threshold. */
+  basis: "provider" | "console";
+  /** "refresh" = re-reading Meta can help right now. */
+  action: string;
+}
+
+export interface ConnectionHealthAccountRow {
+  id: UUID;
+  name: string;
+  business_id: UUID;
+  business_name: string;
+  overall: ConnectionHealthOverall;
+  last_checked_at: ISODateTime | null;
+  checks: ConnectionHealthCheck[];
+}
+
+export interface ConnectionHealthNumberRow {
+  id: UUID;
+  label: string;
+  display_phone_number: string;
+  verified_name: string;
+  business_id: UUID;
+  business_name: string;
+  business_account_id: UUID;
+  overall: ConnectionHealthOverall;
+  last_checked_at: ISODateTime | null;
+  checks: ConnectionHealthCheck[];
+}
+
+export interface ConnectionHealth {
+  generated_at: ISODateTime;
+  overall: ConnectionHealthOverall;
+  summary: string;
+  accounts: ConnectionHealthAccountRow[];
+  numbers: ConnectionHealthNumberRow[];
+  recent_alerts: {
+    id: UUID;
+    severity: "info" | "warning" | "critical";
+    summary: string;
+    occurred_at: ISODateTime;
+    business_name: string;
+  }[];
+  notes: string[];
+}
+
 export interface MfaEnrolment {
   secret: string;
   otpauth_uri: string;
@@ -976,4 +1032,258 @@ export interface FailedJobsSummary {
   campaigns: FailedCampaign[];
   contact_imports: FailedContactImport[];
   exports: FailedExport[];
+}
+
+// --- Failed-message recovery (GET /messages/failures/, /recovery/, POST /retry/) ---
+
+export type RecoveryKind = "retryable" | "not_retryable" | "unknown" | "external";
+
+export interface RecoveryBlocker {
+  code: string;
+  message: string;
+}
+
+export interface RecoveryLink {
+  label: string;
+  url: string;
+}
+
+/** What the retry message itself currently is, exactly as stored (never inferred). */
+export interface RetryAttempt {
+  id: string;
+  status: string;
+  status_label: string;
+  created_at: string;
+  accepted_at: string | null;
+  sent_at: string | null;
+  delivered_at: string | null;
+  read_at: string | null;
+  failed_at: string | null;
+  failure: { category: string; label: string; safe_error: string; can_retry: boolean } | null;
+}
+
+export interface FailureRecovery {
+  category: string;
+  label: string;
+  kind: RecoveryKind;
+  explanation: string;
+  next_step: string;
+  provider_code: string;
+  safe_error: string;
+  can_retry: boolean;
+  blockers: RecoveryBlocker[];
+  links: RecoveryLink[];
+  retried_as: RetryAttempt | null;
+}
+
+export interface FailedMessage {
+  id: string;
+  conversation_id: string;
+  business_id: string;
+  message_type: string;
+  status: string;
+  preview: string;
+  occurred_at: string;
+  failed_at: string | null;
+  recipient: { name: string; phone_number: string };
+  from_number: string;
+  recovery: FailureRecovery;
+}
+
+export interface FailedMessagesResponse {
+  generated_at: string;
+  days: number;
+  total: number;
+  shown: number;
+  kinds: Partial<Record<RecoveryKind, number>>;
+  results: FailedMessage[];
+}
+
+export interface RetryPreview {
+  destination: { name: string; phone_number: string; from_number: string; from_label: string };
+  message_text: string;
+  duplicate_risk: { level: string; text: string };
+  cost: { status: "free" | "estimate" | "unknown"; amount?: string; currency?: string; note: string };
+  confirmation_required: boolean;
+}
+
+export interface FailureDetail extends FailedMessage {
+  message_text: string;
+  retry_preview: RetryPreview | null;
+}
+
+export interface RetryResponse {
+  created: boolean;
+  message: { id: string; status: string; delivered_at: string | null };
+  status_note: string;
+}
+
+// --- WhatsApp setup readiness + verified test message (/whatsapp/setup/, /test-message/*) ---
+
+export type SetupState = "verified" | "pending" | "failed" | "unsupported" | "unknown";
+export type SetupOverall = "not_started" | "in_progress" | "blocked" | "ready";
+
+export interface SetupStep {
+  id: string;
+  title: string;
+  state: SetupState;
+  detail: string;
+  next_step: string;
+  fix_in: "console" | "meta" | "administrator" | "none";
+  action: "" | "connect" | "refresh" | "test_message";
+  evidence: Record<string, unknown>;
+}
+
+export interface SetupStatus {
+  generated_at: string;
+  business: { id: string; name: string } | null;
+  overall: SetupOverall;
+  summary: string;
+  next_step: string;
+  steps: SetupStep[];
+  server: SetupStep;
+  capabilities: Record<"embedded_signup" | "callback_check", { state: SetupState; detail: string }>;
+  webhook: { callback_url: string; verify_token_configured: boolean };
+  accounts: { id: string; name: string; business_id: string; connection_state: string }[];
+  numbers: {
+    id: string;
+    label: string;
+    display_phone_number: string;
+    status: string;
+    business_id: string;
+  }[];
+}
+
+export interface TestMessagePreview {
+  can_send: boolean;
+  sender: { id: string; display_phone_number: string; label: string; business: string };
+  recipient: { name: string; phone_number: string };
+  message_type: string;
+  content: string;
+  template: { id: string; name: string; language: string; category: string } | null;
+  cost: { status: "free" | "estimate" | "unknown"; amount?: string; currency?: string; note: string };
+  restrictions: { source: string; text: string }[];
+  blockers: { code: string; message: string }[];
+  authorization: string;
+  approval: { token: string; expires_in: number } | null;
+}
+
+export interface TestMessageSent {
+  created: boolean;
+  message_id: string;
+  status: string;
+  status_note: string;
+}
+
+export interface TestMessageStatus {
+  id: string;
+  status: string;
+  accepted_at: string | null;
+  sent_at: string | null;
+  delivered_at: string | null;
+  read_at: string | null;
+  failed_at: string | null;
+  error_message: string;
+}
+
+// --- Template Studio (/templates/studio/*, /templates/drafts/*, /templates/<id>/guidance/) ---
+
+export type StudioButton = {
+  type: "QUICK_REPLY" | "URL" | "PHONE_NUMBER";
+  text: string;
+  url?: string;
+  url_example?: string;
+  phone_number?: string;
+};
+
+export interface StudioContent {
+  header_text: string;
+  body: string;
+  examples: Record<string, string>;
+  footer: string;
+  buttons: StudioButton[];
+}
+
+export interface StudioIssue {
+  code: string;
+  field: string;
+  message: string;
+}
+
+export interface StudioChecks {
+  ok: boolean;
+  errors: StudioIssue[];
+  warnings: StudioIssue[];
+  counts: Record<string, { used: number; limit: number }>;
+  preview: {
+    header: string;
+    body: string;
+    footer: string;
+    buttons: { type: string; text: string }[];
+    variables: string[];
+  };
+}
+
+export interface StudioOptions {
+  categories: { value: string; label: string; when: string; supported: boolean; note?: string }[];
+  languages: { value: string; label: string }[];
+  parameter_formats: ("POSITIONAL" | "NAMED")[];
+  button_types: { value: StudioButton["type"]; label: string; max: number }[];
+  limits: Record<string, number>;
+  unsupported: string[];
+  starters: { id: string; title: string; category: string; content: StudioContent }[];
+  source: string;
+}
+
+export type TemplateState =
+  | "draft"
+  | "submitted"
+  | "pending"
+  | "approved"
+  | "rejected"
+  | "paused"
+  | "disabled"
+  | "unknown";
+
+export interface TemplateGuidance {
+  state: TemplateState;
+  meta_status: string;
+  verified_by_meta: boolean;
+  explanation: string;
+  next_step: string;
+  reason: { code: string; meaning: string; how_to_fix: string } | null;
+  can_send: boolean;
+  can_fix_as_new: boolean;
+  links: { label: string; url: string }[];
+  review_note: string;
+}
+
+export type DraftStatus = "draft" | "submitting" | "submitted" | "unconfirmed";
+
+export interface TemplateDraft {
+  id: string;
+  business_account_id: string;
+  name: string;
+  language: string;
+  category: string;
+  parameter_format: "POSITIONAL" | "NAMED";
+  content: StudioContent;
+  status: DraftStatus;
+  status_label: string;
+  template_id: string | null;
+  attempts: number;
+  submitted_at: string | null;
+  last_error: string;
+  last_error_code: string;
+  updated_at: string;
+  checks: StudioChecks;
+  content_hash: string;
+  can_submit: boolean;
+  guidance: TemplateGuidance;
+  components?: Record<string, unknown>[];
+  note?: string;
+}
+
+export interface StudioValidation extends StudioChecks {
+  components: Record<string, unknown>[];
 }

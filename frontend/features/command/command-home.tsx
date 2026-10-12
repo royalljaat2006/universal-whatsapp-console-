@@ -29,7 +29,10 @@ import { inboxService } from "@/services/inbox";
 import { templateService } from "@/services/templates";
 import { whatsappService } from "@/services/whatsapp";
 import { useSession } from "@/stores/session-context";
+import { useUiMode } from "@/stores/ui-mode";
 
+import { HealthSummaryCard } from "../health/health-summary-card";
+import { countIssues } from "../health/model";
 import { OnboardingChecklist } from "../overview/onboarding-checklist";
 import { OverviewView } from "../overview/overview-view";
 import { parseCommand } from "./parse";
@@ -245,6 +248,7 @@ function ResultView({
 export function CommandHome() {
   const router = useRouter();
   const { business, businesses, hasPermission, user } = useSession();
+  const { isSimple } = useUiMode();
   const [text, setText] = useState("");
   const [state, setState] = useState<RunState>({ status: "idle" });
   const [confirmError, setConfirmError] = useState<ApiError | null>(null);
@@ -289,8 +293,29 @@ export function CommandHome() {
     enabled && hasPermission("conversations.view"),
   );
 
+  const health = useApiQuery(
+    () => whatsappService.health(),
+    [business?.id],
+    enabled && hasPermission("numbers.view"),
+  );
+
   const suggestions: Suggestion[] = useMemo(() => {
     const out: Suggestion[] = [];
+    // Only offered when the real health data says something needs attention.
+    if (
+      hasPermission("numbers.view") &&
+      health.data &&
+      health.data.overall !== "healthy" &&
+      health.data.overall !== "unknown"
+    ) {
+      const { problems, warnings } = countIssues(health.data);
+      out.push({
+        id: "health",
+        label: "Check WhatsApp health",
+        command: "Is everything healthy with my WhatsApp numbers?",
+        badge: String(problems + warnings),
+      });
+    }
     if (hasPermission("analytics.view")) {
       const failed = overview.data?.totals.failed ?? 0;
       out.push({
@@ -349,7 +374,7 @@ export function CommandHome() {
       });
     }
     return out;
-  }, [hasPermission, overview.data, unread.data, campaigns.data, templates.data, businesses]);
+  }, [hasPermission, health.data, overview.data, unread.data, campaigns.data, templates.data, businesses]);
 
   const execute = useCallback(
     async (input: string) => {
@@ -531,22 +556,27 @@ export function CommandHome() {
       </div>
 
       <div className="mx-auto flex w-full max-w-3xl flex-col gap-4">
+        {hasPermission("numbers.view") ? (
+          <HealthSummaryCard health={health.data} loading={health.loading} error={health.error} />
+        ) : null}
         <OnboardingChecklist numbers={numbers.data?.results} />
-        <button
-          type="button"
-          aria-expanded={overviewOpen}
-          aria-controls="business-overview"
-          onClick={toggleOverview}
-          className="text-supporting hover:text-foreground inline-flex w-fit items-center gap-1.5 text-sm font-medium"
-        >
-          <ChevronDownIcon
-            aria-hidden
-            className={cn("size-4 transition-transform", !overviewOpen && "-rotate-90")}
-          />
-          Business overview
-        </button>
+        {isSimple ? null : (
+          <button
+            type="button"
+            aria-expanded={overviewOpen}
+            aria-controls="business-overview"
+            onClick={toggleOverview}
+            className="text-supporting hover:text-foreground inline-flex w-fit items-center gap-1.5 text-sm font-medium"
+          >
+            <ChevronDownIcon
+              aria-hidden
+              className={cn("size-4 transition-transform", !overviewOpen && "-rotate-90")}
+            />
+            Business overview
+          </button>
+        )}
       </div>
-      {overviewOpen ? (
+      {overviewOpen && !isSimple ? (
         <div id="business-overview">
           <OverviewView hideOnboarding />
         </div>

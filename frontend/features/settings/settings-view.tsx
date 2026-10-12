@@ -26,6 +26,7 @@ import { accessService, memberScopeService, teamService } from "@/services/acces
 import { tagService } from "@/services/contacts";
 import { cn } from "@/lib/utils";
 import { useSession } from "@/stores/session-context";
+import { useUiMode } from "@/stores/ui-mode";
 
 import {
   AccountSettings,
@@ -51,26 +52,55 @@ type SectionId =
 
 export function SettingsView() {
   const { business, hasPermission } = useSession();
-  const sections: { id: SectionId; label: string; icon: LucideIcon; allowed: boolean }[] = [
+  const { isSimple, setMode } = useUiMode();
+  const sections: {
+    id: SectionId;
+    label: string;
+    icon: LucideIcon;
+    allowed: boolean;
+    /** Technical: only listed in Advanced mode (permissions still apply in both). */
+    advanced?: boolean;
+  }[] = [
     { id: "workspace", label: "Workspace", icon: Building2Icon, allowed: hasPermission("organization.view") },
     // Always available — this is about the signed-in person, not an
     // organization permission.
     { id: "account", label: "Your account", icon: UserIcon, allowed: true },
     { id: "members", label: "Members", icon: UserPlusIcon, allowed: hasPermission("members.view") },
-    { id: "roles", label: "Roles", icon: ShieldIcon, allowed: hasPermission("roles.manage") },
-    { id: "access", label: "Business access", icon: KeyRoundIcon, allowed: hasPermission("members.manage") },
-    { id: "apikeys", label: "API keys", icon: CodeIcon, allowed: hasPermission("api_keys.manage") },
+    { id: "roles", label: "Roles", icon: ShieldIcon, allowed: hasPermission("roles.manage"), advanced: true },
+    {
+      id: "access",
+      label: "Business access",
+      icon: KeyRoundIcon,
+      allowed: hasPermission("members.manage"),
+      advanced: true,
+    },
+    {
+      id: "apikeys",
+      label: "API keys",
+      icon: CodeIcon,
+      allowed: hasPermission("api_keys.manage"),
+      advanced: true,
+    },
     {
       id: "whatsapp",
       label: "WhatsApp",
       icon: SmartphoneIcon,
       allowed: hasPermission("integrations.manage"),
+      advanced: true,
     },
     { id: "teams", label: "Teams", icon: UsersIcon, allowed: hasPermission("teams.view") },
     { id: "tags", label: "Tags", icon: TagIcon, allowed: hasPermission("contacts.view") },
-    { id: "audit", label: "Audit log", icon: ScrollTextIcon, allowed: hasPermission("audit.view") },
+    {
+      id: "audit",
+      label: "Audit log",
+      icon: ScrollTextIcon,
+      allowed: hasPermission("audit.view"),
+      advanced: true,
+    },
   ];
-  const available = sections.filter((section) => section.allowed);
+  const permitted = sections.filter((section) => section.allowed);
+  const available = permitted.filter((section) => !isSimple || !section.advanced);
+  const hiddenInSimple = permitted.length - available.length;
   const [current, setCurrent] = useState<SectionId>(available[0]?.id ?? "workspace");
   const active = available.find((section) => section.id === current) ?? available[0];
 
@@ -100,6 +130,19 @@ export function SettingsView() {
               </button>
             );
           })}
+          {isSimple && hiddenInSimple > 0 ? (
+            <div className="text-caption mt-2 hidden rounded-md border border-dashed px-3 py-2 md:block">
+              {hiddenInSimple} more technical setting{hiddenInSimple === 1 ? "" : "s"} (roles, API keys,
+              audit log…) are in Advanced mode.
+              <button
+                type="button"
+                className="text-primary mt-1 block font-medium hover:underline"
+                onClick={() => setMode("advanced")}
+              >
+                Switch to Advanced
+              </button>
+            </div>
+          ) : null}
         </nav>
         <div className="min-w-0">
           {active?.id === "workspace" ? <Workspace /> : null}

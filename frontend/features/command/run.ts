@@ -5,9 +5,13 @@ import { analyticsService } from "@/services/analytics";
 import { campaignService } from "@/services/campaigns";
 import { contactService } from "@/services/contacts";
 import { inboxService } from "@/services/inbox";
-import { templateService } from "@/services/templates";
-import type { Campaign, CampaignStatus } from "@/types/api";
+import { recoveryService } from "@/services/recovery";
+import { templateService, templateStudioService } from "@/services/templates";
+import { whatsappService } from "@/services/whatsapp";
+import type { Campaign, CampaignStatus, RecoveryKind, SetupState } from "@/types/api";
 
+import { OVERALL_LABEL, countIssues, topIssues } from "../health/model";
+import { KIND_LABEL, recipientLabel } from "../recovery/model";
 import { SUPPORTED_EXAMPLES } from "./parse";
 import type { CommandContext, CommandResult, ParsedCommand, RangeKey, ResultRow, Tone } from "./types";
 
@@ -113,7 +117,82 @@ async function performance(cmd: ParsedCommand, ctx: CommandContext): Promise<Com
   };
 }
 
+const STEP_LABEL: Record<SetupState, string> = {
+  verified: "Done",
+  pending: "Not yet",
+  failed: "Needs fixing",
+  unsupported: "Not available",
+  unknown: "Can't tell yet",
+};
+const STEP_TONE: Record<SetupState, Tone> = {
+  verified: "success",
+  pending: "neutral",
+  failed: "danger",
+  unsupported: "neutral",
+  unknown: "neutral",
+};
+
+const RECOVERY_TONE: Record<RecoveryKind, Tone> = {
+  retryable: "neutral",
+  not_retryable: "danger",
+  unknown: "warning",
+  external: "warning",
+};
+
+const RECOVERY_DAYS: Partial<Record<RangeKey, number>> = { today: 1, "7d": 7, "30d": 30 };
+
+/**
+ * Failed messages with their real recovery guidance, from the same endpoint as
+ * the Failed messages page. Read-only: a retry is never started from the
+ * command box - the page shows the preview and asks for confirmation.
+ */
+async function recoverableFailures(cmd: ParsedCommand, ctx: CommandContext): Promise<CommandResult> {
+  const days = RECOVERY_DAYS[cmd.range] ?? 7;
+  const period = cmd.range === "today" ? "in the last 24 hours" : PERIOD_LABEL[cmd.range];
+  const f = await recoveryService.failures({ days, limit: 5 });
+  const links = [{ label: "Open failed messages", href: "/failed-messages" }];
+  if (f.total === 0) {
+    return {
+      kind: "empty",
+      title: `No failed messages ${period}`,
+      summary: `${ctx.business?.name ?? "This business"} had no message failures ${period}.`,
+      links,
+    };
+  }
+  const retryable = f.kinds.retryable ?? 0;
+  const fixFirst = (f.kinds.not_retryable ?? 0) + (f.kinds.external ?? 0);
+  const unclear = f.kinds.unknown ?? 0;
+  const notes = [
+    "A retry is only offered when the message was certainly not sent. Open Failed messages to review the details and confirm; nothing is sent from here.",
+  ];
+  if (f.total > f.shown) notes.push(`Showing the latest ${f.shown} of ${f.total}. Open Failed messages for the rest.`);
+  return {
+    kind: "answer",
+    title: `Failed messages ${period}`,
+    summary: `${count(f.total)} failed. ${retryable > 0 ? `${count(retryable)} can be retried safely.` : "None can be retried safely right now."}`,
+    stats: [
+      { label: "Failed", value: count(f.total), tone: "danger" },
+      { label: "Safe to retry", value: count(retryable) },
+      { label: "Fix first", value: count(fixFirst), tone: fixFirst > 0 ? "warning" : "neutral" },
+      { label: "Outcome unclear", value: count(unclear), tone: unclear > 0 ? "warning" : "neutral" },
+    ],
+    rows: f.results.map((r) => ({
+      id: r.id,
+      title: recipientLabel(r),
+      subtitle: `${r.recovery.label}: ${r.recovery.next_step}`,
+      meta: shortTime(r.failed_at ?? r.occurred_at, ctx.now),
+      badge: { text: KIND_LABEL[r.recovery.kind], tone: RECOVERY_TONE[r.recovery.kind] },
+      href: "/failed-messages",
+    })),
+    notes,
+    links,
+  };
+}
+
 async function failedMessages(cmd: ParsedCommand, ctx: CommandContext): Promise<CommandResult> {
+  if (ctx.hasPermission("conversations.view") && ctx.business && cmd.range !== "yesterday") {
+    return recoverableFailures(cmd, ctx);
+  }
   if (!ctx.hasPermission("analytics.view")) return denied("analytics.view", "Failure details");
   if (!ctx.business) return noBusiness();
   const range = presetRange(cmd.range, ctx.business.timezone || undefined, ctx.now);
@@ -302,7 +381,7 @@ async function templatesAttention(_cmd: ParsedCommand, ctx: CommandContext): Pro
     let tone: Tone = "warning";
     if (t.missing_from_provider) reason = "No longer found at Meta. It may have been deleted there.";
     else if (status === "rejected") {
-      reason = t.rejected_reason || "Rejected by Meta.";
+      reason = `Rejected by Meta${t.rejected_reason && t.rejected_reason !== "NONE" ? `: ${t.rejected_reason}` : ""}. Open it to see how to fix it.`;
       tone = "danger";
     } else if (status === "paused" || status === "disabled") {
       reason = `Meta has ${status} this template.`;
@@ -339,6 +418,127 @@ async function templatesAttention(_cmd: ParsedCommand, ctx: CommandContext): Pro
     summary: `Of ${page.results.length} templates for ${ctx.business.name}.`,
     rows,
     notes: page.next ? ["Looked at the first 100 templates."] : [],
+    links,
+  };
+}
+
+async function connectionHealth(_cmd: ParsedCommand, ctx: CommandContext): Promise<CommandResult> {
+  if (!ctx.hasPermission("numbers.view")) return denied("numbers.view", "WhatsApp health");
+  const h = await whatsappService.health();
+  const links = [{ label: "Open WhatsApp numbers", href: "/numbers" }];
+  if (h.numbers.length === 0 && h.accounts.length === 0) {
+    return {
+      kind: "empty",
+      title: "No WhatsApp number is connected yet",
+      summary: "There is nothing to check until a WhatsApp Business Account is connected.",
+      links,
+    };
+  }
+  const { problems, warnings } = countIssues(h);
+  const issues = topIssues(h, 6);
+  const tone = (state: string): Tone => (state === "problem" ? "danger" : state === "warning" ? "warning" : "neutral");
+  return {
+    kind: "answer",
+    title: `WhatsApp health: ${OVERALL_LABEL[h.overall]}`,
+    summary: h.summary,
+    stats: [
+      { label: "Numbers", value: String(h.numbers.length) },
+      {
+        label: "Problems",
+        value: String(problems),
+        tone: problems > 0 ? "danger" : "neutral",
+      },
+      { label: "Need attention", value: String(warnings), tone: warnings > 0 ? "warning" : "neutral" },
+    ],
+    rows: issues.length
+      ? issues.map(({ subject, check }, i) => ({
+          id: `${subject}-${check.code}-${i}`,
+          title: `${subject}: ${check.title}`,
+          subtitle: check.next_step || check.detail,
+          meta: check.fix_in === "meta" ? "Fix in Meta's WhatsApp Manager" : undefined,
+          badge: { text: check.state === "problem" ? "problem" : "attention", tone: tone(check.state) },
+          href: "/numbers",
+        }))
+      : undefined,
+    notes: h.notes,
+    links,
+  };
+}
+
+async function setupStatus(_cmd: ParsedCommand, ctx: CommandContext): Promise<CommandResult> {
+  if (!ctx.hasPermission("numbers.view")) return denied("numbers.view", "WhatsApp setup");
+  const s = await whatsappService.setup();
+  const links = [{ label: "Open Set up WhatsApp", href: "/setup" }];
+  const done = s.steps.filter((x) => x.state === "verified").length;
+  const open = s.steps.filter((x) => x.state !== "verified");
+  if (s.overall === "ready") {
+    return {
+      kind: "answer",
+      title: "WhatsApp is set up",
+      summary: s.summary,
+      stats: [{ label: "Steps done", value: `${done} of ${s.steps.length}`, tone: "success" }],
+      links,
+    };
+  }
+  return {
+    kind: "answer",
+    title: s.overall === "not_started" ? "WhatsApp isn't set up yet" : "WhatsApp setup isn't finished",
+    summary: s.summary,
+    stats: [
+      { label: "Steps done", value: `${done} of ${s.steps.length}` },
+      { label: "Needs fixing", value: count(s.steps.filter((x) => x.state === "failed").length), tone: s.overall === "blocked" ? "danger" : "neutral" },
+    ],
+    rows: open.map((x) => ({
+      id: x.id,
+      title: x.title,
+      subtitle: x.next_step || x.detail,
+      badge: { text: STEP_LABEL[x.state], tone: STEP_TONE[x.state] },
+      href: "/setup",
+    })),
+    notes: [
+      "Each step is based on what Meta reported or on events that really arrived. Nothing is marked done without evidence.",
+    ],
+    links,
+  };
+}
+
+function testMessageHelp(_cmd: ParsedCommand, ctx: CommandContext): CommandResult {
+  if (!ctx.hasPermission("messages.send")) return denied("messages.send", "Sending a test message");
+  return {
+    kind: "answer",
+    title: "Send a test message from the Set up page",
+    summary:
+      "A test message first shows you exactly what would be sent, to whom and from which number, then needs your separate approval. Nothing is sent from this box.",
+    links: [{ label: "Open Set up WhatsApp", href: "/setup" }],
+  };
+}
+
+async function templateStudio(_cmd: ParsedCommand, ctx: CommandContext): Promise<CommandResult> {
+  if (!ctx.hasPermission("templates.manage")) return denied("templates.manage", "Writing a template");
+  if (!ctx.business) return noBusiness();
+  const links = [{ label: "Open the Template Studio", href: "/templates?new=1" }];
+  const drafts = ctx.hasPermission("templates.view") ? (await templateStudioService.drafts()).results : [];
+  const rows: ResultRow[] = drafts.map((d) => ({
+    id: d.id,
+    title: `${d.name} (${d.language})`,
+    subtitle: d.status === "draft" ? "Draft: not sent to Meta" : d.guidance.explanation,
+    badge: {
+      text: d.status === "draft" ? "draft" : d.guidance.state,
+      tone: d.guidance.state === "rejected" ? "danger" : d.guidance.state === "approved" ? "success" : "neutral",
+    },
+    href: "/templates",
+  }));
+  return {
+    kind: "answer",
+    title: "Write a template in the Template Studio",
+    summary:
+      "The Studio guides you step by step, checks the template against Meta's rules, and shows a preview. Nothing is sent to Meta until you confirm, and it is not approved until Meta says so.",
+    rows,
+    notes: [
+      rows.length
+        ? "Your drafts and templates already sent from the Studio are listed below."
+        : "You have no drafts yet.",
+    ],
     links,
   };
 }
@@ -575,6 +775,14 @@ export async function runCommand(cmd: ParsedCommand, ctx: CommandContext): Promi
       return templatesAttention(cmd, ctx);
     case "unread":
       return unread(cmd, ctx);
+    case "health":
+      return connectionHealth(cmd, ctx);
+    case "setup":
+      return setupStatus(cmd, ctx);
+    case "test_message":
+      return testMessageHelp(cmd, ctx);
+    case "template_studio":
+      return templateStudio(cmd, ctx);
     case "search":
       return search(cmd, ctx);
     case "launch_campaign":

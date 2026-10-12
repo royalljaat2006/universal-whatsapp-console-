@@ -1,6 +1,6 @@
 "use client";
 
-import { Building2Icon, CheckIcon, HelpCircleIcon, LogOutIcon } from "lucide-react";
+import { Building2Icon, CheckIcon, HelpCircleIcon, LogOutIcon, SlidersHorizontalIcon } from "lucide-react";
 import { useState } from "react";
 
 import {
@@ -15,9 +15,11 @@ import {
 import { InitialsAvatar } from "@/components/ui/initials-avatar";
 import { HelpSupportSheet } from "@/components/layout/help-support-sheet";
 import { useSession } from "@/stores/session-context";
+import { useUiMode } from "@/stores/ui-mode";
 
 export function UserMenu() {
   const { user, memberships, active, selectOrganization, logout } = useSession();
+  const { mode, setMode } = useUiMode();
   const [helpOpen, setHelpOpen] = useState(false);
   if (!user) return null;
   const name = user.full_name || user.email;
@@ -61,6 +63,27 @@ export function UserMenu() {
               </DropdownMenuGroup>
             </>
           ) : null}
+          <DropdownMenuSeparator />
+          <DropdownMenuGroup>
+            <DropdownMenuLabel>
+              <SlidersHorizontalIcon aria-hidden className="mr-1 inline size-3.5" />
+              How much to show
+            </DropdownMenuLabel>
+            <DropdownMenuItem onClick={() => setMode("simple")} aria-checked={mode === "simple"} role="menuitemradio">
+              <span className="flex-1">
+                Simple
+                <span className="text-caption block">The everyday essentials</span>
+              </span>
+              {mode === "simple" ? <CheckIcon aria-label="Selected" className="text-primary" /> : null}
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => setMode("advanced")} aria-checked={mode === "advanced"} role="menuitemradio">
+              <span className="flex-1">
+                Advanced
+                <span className="text-caption block">Every page and setting</span>
+              </span>
+              {mode === "advanced" ? <CheckIcon aria-label="Selected" className="text-primary" /> : null}
+            </DropdownMenuItem>
+          </DropdownMenuGroup>
           <DropdownMenuSeparator />
           <DropdownMenuItem onClick={() => setHelpOpen(true)}>
             <HelpCircleIcon aria-hidden />
