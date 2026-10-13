@@ -13,6 +13,8 @@ os.environ.setdefault(
 # inside CI service containers; override via real env vars when needed.
 os.environ.setdefault("RATE_LIMIT_REDIS_URL", "redis://localhost:6379/3")
 
+from decimal import Decimal
+
 from .base import *
 
 APP_ENV = "test"
@@ -29,6 +31,8 @@ CELERY_TASK_ALWAYS_EAGER = True
 CELERY_TASK_EAGER_PROPAGATES = True
 OUTBOUND_THROTTLE_ENABLED = False
 CAMPAIGN_AUTO_TICK = False
+# Pricing markup is off by default in tests; its own tests switch it on.
+PRICING_MARKUP_PERCENT = Decimal("0")
 
 # Deterministic Meta configuration. Tests must never reach graph.facebook.com;
 # the provider's HTTP transport is replaced in tests (see tests/conftest.py).

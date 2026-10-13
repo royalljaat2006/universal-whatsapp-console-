@@ -36,3 +36,10 @@ backend/celerybeat-schedule*
 Thumbs.db
 .idea/
 .vscode/
+
+# Confidential / operator-only notes and pricing policy: keep local, never commit.
+# (This only affects files that are NOT yet tracked: real values belong in .env.)
+docs/private/
+**/*.private.*
+**/*.confidential.*
+backend/**/pricing_policy*

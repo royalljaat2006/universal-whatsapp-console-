@@ -19,6 +19,7 @@ from typing import Any
 
 from django.db.models import Q, QuerySet
 
+from apps.billing.markup import charged_rate
 from apps.billing.models import PricingMarket, PricingRule
 
 REST_OF_WORLD = "*"
@@ -35,6 +36,9 @@ class CostQuote:
     unit_rate: Decimal
     amount: Decimal
     billable: bool
+    # Meta's own rate and the markup percent that turned it into ``unit_rate``.
+    base_rate: Decimal = Decimal("0")
+    markup_percent: Decimal = Decimal("0")
 
 
 def _effective(qs: QuerySet[Any], at: datetime) -> QuerySet[Any]:
@@ -134,6 +138,13 @@ def quote(
         business_account_id=business_account_id,
         monthly_volume=monthly_volume,
     )
+    rate, percent = charged_rate(rule, organization_id)
     return CostQuote(
-        rule=rule, currency=rule.currency, unit_rate=rule.rate, amount=rule.rate, billable=True
+        rule=rule,
+        currency=rule.currency,
+        unit_rate=rate,
+        amount=rate,
+        billable=True,
+        base_rate=rule.rate,
+        markup_percent=percent,
     )

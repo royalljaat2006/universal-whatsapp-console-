@@ -16,6 +16,7 @@ from uuid import UUID
 from django.db import IntegrityError, transaction
 from django.utils import timezone
 
+from apps.billing import markup
 from apps.billing.models import MessageCost
 from apps.billing.pricing import PricingRuleNotFoundError, market_for_phone, quote
 from apps.messaging.models import Message
@@ -113,7 +114,10 @@ def price_message(message_id: UUID | str) -> str:
             "category": category,
             "pricing_type": message.pricing_type,
             "currency": rule.currency,
-            "unit_rate": str(rule.rate),
+            "unit_rate": str(result.unit_rate),
+            "meta_rate": str(result.base_rate),
+            "markup_percent": str(result.markup_percent),
+            "markup_reason": markup.explain(rule, message.organization_id)["markup_reason"],
             "monthly_volume_before": volume,
             "tier": [rule.volume_tier_min, rule.volume_tier_max],
             "delivered_at": delivered_at.isoformat(),

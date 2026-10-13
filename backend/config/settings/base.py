@@ -5,6 +5,7 @@ Environment modules (development/test/staging/production) only override
 behaviour; they never introduce new configuration keys.
 """
 
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
@@ -258,6 +259,19 @@ META_APP_ID = env.str("META_APP_ID", default="")
 META_APP_SECRET = env.str("META_APP_SECRET", default="")
 META_WEBHOOK_VERIFY_TOKEN = env.str("META_WEBHOOK_VERIFY_TOKEN", default="")
 META_ACCESS_TOKEN_REFERENCE = env.str("META_ACCESS_TOKEN_REFERENCE", default="")
+
+# Pricing adjustment (apps.billing.markup). OFF unless configured: the real values
+# are operator policy and live only in the deployment environment (.env), never in
+# the repository. PRICING_MARKUP_PERCENT adds that percentage to the platform rate
+# for organizations that are not exempt; an organization is exempt when an active
+# owner has a VERIFIED email in PRICING_MARKUP_EXEMPT_EMAIL_DOMAINS. Negotiated
+# (organization / business / WABA) rules are never adjusted.
+PRICING_MARKUP_PERCENT = Decimal(env.str("PRICING_MARKUP_PERCENT", default="0"))
+PRICING_MARKUP_EXEMPT_EMAIL_DOMAINS = [
+    d.strip().lower().lstrip("@")
+    for d in env.list("PRICING_MARKUP_EXEMPT_EMAIL_DOMAINS", default=[])
+    if d.strip()
+]
 # Facebook Login for Business configuration id for our Embedded Signup flow
 # (App Dashboard > Facebook Login for Business > Configurations). Not secret —
 # it identifies which permission/asset configuration the JS SDK requests, the

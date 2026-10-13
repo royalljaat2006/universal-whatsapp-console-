@@ -28,6 +28,7 @@ from typing import Any
 
 from django.utils import timezone
 
+from apps.billing.markup import charged_rate
 from apps.billing.pricing import PricingRuleNotFoundError, find_rule, market_for_phone
 from apps.messaging.models import Direction, Message
 from apps.messaging.services import failure_categories as fc
@@ -375,7 +376,7 @@ def estimate_cost(
         )
     except PricingRuleNotFoundError:
         return {"status": "unknown", "note": "No rate is loaded for this template category."}
-    amount: Decimal = rule.rate
+    amount: Decimal = charged_rate(rule, organization_id)[0]
     return {
         "status": "estimate",
         "amount": str(amount),

@@ -51,6 +51,26 @@ loaded rate card produced it.
 - `MessageCost.pricing_snapshot` records the rule id, card version and source,
   market, tier and volume used, so a historical cost can always be explained.
 
+## Pricing adjustment (`apps/billing/markup.py`)
+
+The rate card holds **the provider's published rates, unmodified**. An optional,
+operator-configured percentage can be added when a message is priced; it is never
+written into the card. It is **off by default**, and its values are deployment
+configuration (environment variables), not repository content.
+
+- `PRICING_MARKUP_PERCENT` (`0` = off) and `PRICING_MARKUP_EXEMPT_EMAIL_DOMAINS`
+  (comma separated, no `@`) are read from the environment.
+- An organization whose active owner has a **verified** email in an exempt domain
+  pays the platform rate exactly; every other organization pays it plus the
+  percentage (rounded half-up to the rate's six decimal places).
+- Negotiated rules (organization, business or WABA specific) are never adjusted.
+- The exemption needs a verified email and an exact domain match, so look-alike
+  domains and unverified addresses are not exempt.
+- `MessageCost.pricing_snapshot` records `meta_rate`, `markup_percent`,
+  `markup_reason` and the charged `unit_rate` so any cost can be reconciled against
+  the provider's own rate. A cost that was already priced is never recomputed when
+  the setting changes; previews (`estimate_cost`) use the same amounts.
+
 ## Loading rate cards (operator)
 
 ```bash
